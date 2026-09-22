@@ -1,0 +1,27 @@
+# OTP authentication & session design
+
+**Status:** accepted
+
+## Context
+
+`docs/features.md`'s original auth section assumed password-based auth: JWT access+refresh with `bcrypt` hashing, `POST /auth/register|login|refresh|logout`. Issue #1 already settled phone number + OTP as the auth mechanism (no email/password, no Google OAuth), and issue #2 (closed) recommended Twilio Verify for server-side OTP verification over Firebase Phone Auth. Issue #9 (part of the build-ready spec map in #1) works out what actually replaces those four endpoints and the `User` model's auth fields, and this ADR's output directly unblocks #5 (Postgres schema), which needs the `User`/`Session` table shape decided here.
+
+## Decisions
+
+- **Provider & verification: Twilio Verify, server-side.** Confirmed from #2 — `verifications.create` / `verificationChecks.create`, chosen over Firebase Phone Auth because Firebase verifies client-side, leaving the Node backend nothing to showcase.
+- **OTP policy is provider-managed.** OTP length/generation/expiry are opaque to the app — Twilio Verify owns them, not configurable app-side. What's ours to protect is `POST /auth/otp/request` itself, since every call costs real SMS money regardless of Twilio's own fraud guard: rate-limited via an event-log table, `otp_requests(id, phoneNumber, requestedAt)` indexed on `(phoneNumber, requestedAt)`, rejecting a request once a phone number has 3+ rows with `requestedAt > now() - 15 minutes`. Chosen over a fixed-window counter table because the event log avoids the fixed-window boundary-burst problem and needs no upsert/race handling.
+- **Token issuance: our own JWT access+refresh pair**, issued by Node after a successful `verificationChecks.create`. Not an independent fork — Twilio Verify has no session/token capability at all, so this is a direct consequence of the provider choice.
+- **Identifier scope: phone number only.** Sole identifier, sole field collected at signup. `email` and `passwordHash` are dropped from `User` entirely — both are dead under this model. `User.displayName` is a nullable column with no forced collection step; the UI falls back to a formatted phone number (e.g. last 4 digits) wherever a display name would show. Setting a real one is a later profile-edit action, out of scope here.
+- **Register/login collapse.** No separate register vs. login endpoints — that would require exposing "does this phone number exist" before verification, a phone-number-enumeration leak. A single `POST /auth/otp/request` works regardless of whether the number is known; `POST /auth/otp/verify` auto-creates the `User` row on first successful verification if none exists, then issues the session either way. Replaces `docs/features.md`'s four endpoints with three: `POST /auth/otp/request`, `POST /auth/otp/verify`, `POST /auth/refresh`, `POST /auth/logout`.
+- **Session model: multi-device.** A user can have multiple concurrent logged-in Sessions (e.g. phone + tablet); a new login does not invalidate existing ones. This is the realistic expectation for a chat app, and #8 (push notifications, not yet designed) will need a per-device token table regardless — which only makes sense under a multi-device model.
+- **Session/refresh-token table:** one `Session` row per device — `id, userId, deviceId (client-generated UUID sent at login), platform, refreshTokenHash (sha256, raw token never stored), issuedAt, expiresAt, lastUsedAt, revokedAt (nullable)`.
+- **Refresh rotation: in-place.** Every successful `POST /auth/refresh` issues a new refresh token and overwrites the hash on the same `Session` row, rather than inserting a new row per refresh — keeps the table bounded to users×devices, not users×devices×time. Reuse of an already-rotated or revoked refresh token is treated as a theft signal and revokes that Session outright.
+- **Access token: JWT, 15 min TTL**, carrying a `sessionId` claim. Auth middleware does one indexed lookup per request to confirm `Session.revokedAt IS NULL` — this is what makes logout/revocation take effect immediately, since a pure stateless JWT otherwise can't be revoked before its own expiry. **Refresh token TTL: 30 days, sliding** (extended on each successful rotation).
+- **Flutter token storage: `flutter_secure_storage`** for the access+refresh pair. A Dio interceptor catches 401s, performs a single-flight refresh (concurrent 401s must not fire parallel refresh calls), retries the original request on success, and on refresh failure clears storage and routes to `/login` via the auth-state provider from ADR 0001.
+
+## Consequences
+
+- The Node backend carries no password-related code at all (no `bcrypt`, no password reset flow) — auth is entirely OTP request/verify plus the session lifecycle above.
+- Any endpoint needing to know "who is this" reads `sessionId` off the JWT and checks `Session.revokedAt IS NULL`, not just JWT signature validity — auth middleware has a DB dependency, unlike a fully stateless-JWT design.
+- `User.displayName` being nullable means every UI surface that renders a user's name (conversation lists, group member lists, message headers) must handle the null case with the phone-number fallback — this can't be deferred to a later ticket without a visible gap.
+- #5 (Postgres schema) can now model `User` (no email/password, nullable displayName) and `Session` (per this ADR) directly; #8 (push notifications) has a `Session`/device concept to attach device tokens to.
