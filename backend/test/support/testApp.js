@@ -19,7 +19,7 @@ export function createTestPrisma() {
   return createPrismaClient(testDatabaseUrl());
 }
 
-export function buildTestApp({ prisma, e2eMode = false } = {}) {
+export function buildTestApp({ prisma, e2eMode = false, pumpOptions } = {}) {
   const clock = createFakeClock();
   const verifyClient = createFakeVerifyClient({ code: TEST_OTP_CODE });
   const sessionRevoked = createSessionRevokedHook();
@@ -30,6 +30,7 @@ export function buildTestApp({ prisma, e2eMode = false } = {}) {
     jwtSecret: TEST_JWT_SECRET,
     sessionRevoked,
     e2eMode,
+    pumpOptions,
   });
   return { app, httpServer, realtime, clock, verifyClient, sessionRevoked };
 }
