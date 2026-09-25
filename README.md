@@ -28,6 +28,8 @@ npm run db:migrate       # creates the dev database if missing and applies migra
 npm run dev              # http://localhost:3000
 ```
 
+Outside e2e mode the server sends real SMS codes through Twilio Verify, so it needs `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and `TWILIO_VERIFY_SERVICE_SID` (see `.env.example`), and refuses to start without them.
+
 **Backend tests** drive the real HTTP API with supertest against the Postgres database in `TEST_DATABASE_URL`, using a fake OTP verifier and a controllable clock. `npm test` applies migrations to that database first. The tests truncate it, so never point it at data you care about.
 
 ```sh

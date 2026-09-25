@@ -8,11 +8,17 @@ part of 'auth_state.dart';
 
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // ignore_for_file: type=lint, type=warning
+/// The one source of truth for whether the app is signed in; the router
+/// gates screens on it.
 
 @ProviderFor(AuthState)
 final authStateProvider = AuthStateProvider._();
 
+/// The one source of truth for whether the app is signed in; the router
+/// gates screens on it.
 final class AuthStateProvider extends $NotifierProvider<AuthState, AuthStatus> {
+  /// The one source of truth for whether the app is signed in; the router
+  /// gates screens on it.
   AuthStateProvider._()
     : super(
         from: null,
@@ -40,7 +46,10 @@ final class AuthStateProvider extends $NotifierProvider<AuthState, AuthStatus> {
   }
 }
 
-String _$authStateHash() => r'2f59866d2107af30524af002e7d72e64709c84bf';
+String _$authStateHash() => r'7d52c40d6146034a53698423c2ce22fd5d4fbba6';
+
+/// The one source of truth for whether the app is signed in; the router
+/// gates screens on it.
 
 abstract class _$AuthState extends $Notifier<AuthStatus> {
   AuthStatus build();

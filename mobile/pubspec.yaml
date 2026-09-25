@@ -38,6 +38,8 @@ dependencies:
   riverpod_annotation: ^4.0.7
   go_router: ^18.0.1
   dio: ^5.11.1
+  flutter_secure_storage: ^11.2.0
+  uuid: ^4.6.0
 
 dev_dependencies:
   flutter_test:

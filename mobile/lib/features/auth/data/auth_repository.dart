@@ -1,0 +1,63 @@
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
+
+import '../../../core/models/user.dart';
+import '../../../core/network/dio_provider.dart';
+import '../../../core/storage/token_store.dart';
+
+part 'auth_repository.g.dart';
+
+/// What a successful verify hands back: a new Session's tokens and its User.
+class SignInResult {
+  const SignInResult({
+    required this.accessToken,
+    required this.refreshToken,
+    required this.user,
+  });
+
+  final String accessToken;
+  final String refreshToken;
+  final User user;
+}
+
+class AuthRepository {
+  AuthRepository(this._dio, this._tokenStore);
+
+  final Dio _dio;
+  final TokenStore _tokenStore;
+
+  /// Asks the backend to text a code to [phoneNumber] (with its +country code).
+  Future<void> requestOtp(String phoneNumber) async {
+    await _dio.post<void>(
+      '/auth/otp/request',
+      data: {'phoneNumber': phoneNumber},
+    );
+  }
+
+  /// Exchanges the texted [code] for a Session on this Device.
+  Future<SignInResult> verifyOtp(String phoneNumber, String code) async {
+    final res = await _dio.post<Map<String, dynamic>>(
+      '/auth/otp/verify',
+      data: {
+        'phoneNumber': phoneNumber,
+        'code': code,
+        'deviceId': await _tokenStore.deviceId(),
+        'platform': _platform,
+      },
+    );
+    final body = res.data!;
+    return SignInResult(
+      accessToken: body['accessToken'] as String,
+      refreshToken: body['refreshToken'] as String,
+      user: User.fromJson(body['user'] as Map<String, dynamic>),
+    );
+  }
+
+  static String get _platform =>
+      defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android';
+}
+
+@Riverpod(keepAlive: true)
+AuthRepository authRepository(Ref ref) =>
+    AuthRepository(ref.watch(dioProvider), ref.watch(tokenStoreProvider));

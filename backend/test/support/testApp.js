@@ -5,6 +5,7 @@ import { createFakeVerifyClient } from '../../src/verify/fakeVerifyClient.js';
 import { createFakeClock } from './fakeClock.js';
 
 export const TEST_OTP_CODE = '123456';
+export const TEST_JWT_SECRET = 'test-jwt-secret';
 
 export function testDatabaseUrl() {
   const url = process.env.TEST_DATABASE_URL;
@@ -24,7 +25,7 @@ export function buildTestApp({ prisma, e2eMode = false } = {}) {
     prisma,
     verifyClient,
     clock,
-    jwtSecret: 'test-jwt-secret',
+    jwtSecret: TEST_JWT_SECRET,
     e2eMode,
   });
   return { app, clock, verifyClient };

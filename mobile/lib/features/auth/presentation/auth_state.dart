@@ -1,17 +1,50 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../../../core/models/user.dart';
+import '../../../core/storage/token_store.dart';
+import '../data/auth_repository.dart';
+
 part 'auth_state.g.dart';
 
-enum AuthStatus { unauthenticated, authenticated }
+sealed class AuthStatus {
+  const AuthStatus();
+}
 
-// Placeholder until the phone+OTP flow (data layer + session persistence)
-// lands; the router only needs to know when this flips to authenticated.
+class Unauthenticated extends AuthStatus {
+  const Unauthenticated();
+}
+
+class Authenticated extends AuthStatus {
+  const Authenticated(this.user);
+
+  final User user;
+}
+
+/// The one source of truth for whether the app is signed in; the router
+/// gates screens on it.
 @Riverpod(keepAlive: true)
 class AuthState extends _$AuthState {
   @override
-  AuthStatus build() => AuthStatus.unauthenticated;
+  AuthStatus build() => const Unauthenticated();
 
-  void signIn() => state = AuthStatus.authenticated;
+  Future<void> requestOtp(String phoneNumber) =>
+      ref.read(authRepositoryProvider).requestOtp(phoneNumber);
 
-  void signOut() => state = AuthStatus.unauthenticated;
+  Future<void> verifyOtp(String phoneNumber, String code) async {
+    final result = await ref
+        .read(authRepositoryProvider)
+        .verifyOtp(phoneNumber, code);
+    await ref
+        .read(tokenStoreProvider)
+        .saveTokens(
+          accessToken: result.accessToken,
+          refreshToken: result.refreshToken,
+        );
+    state = Authenticated(result.user);
+  }
+
+  Future<void> signOut() async {
+    await ref.read(tokenStoreProvider).clearTokens();
+    state = const Unauthenticated();
+  }
 }

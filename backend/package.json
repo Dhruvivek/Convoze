@@ -21,7 +21,10 @@
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "express": "^5.2.1",
-    "pg": "^8.23.0"
+    "jsonwebtoken": "^9.0.3",
+    "libphonenumber-js": "^1.13.14",
+    "pg": "^8.23.0",
+    "twilio": "^6.1.1"
   },
   "devDependencies": {
     "prisma": "^7.10.0",

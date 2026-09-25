@@ -3,6 +3,7 @@ import { systemClock } from './clock.js';
 import { loadConfig } from './config.js';
 import { createPrismaClient } from './db.js';
 import { createFakeVerifyClient } from './verify/fakeVerifyClient.js';
+import { createTwilioVerifyClient } from './verify/twilioVerifyClient.js';
 
 let config;
 try {
@@ -13,8 +14,9 @@ try {
 }
 
 const prisma = createPrismaClient(config.databaseUrl);
-// Outside e2e mode the Twilio Verify client is wired in by #23.
-const verifyClient = config.e2eMode ? createFakeVerifyClient({ code: config.e2eOtpCode }) : null;
+const verifyClient = config.e2eMode
+  ? createFakeVerifyClient({ code: config.e2eOtpCode })
+  : createTwilioVerifyClient(config.twilio);
 
 const app = createApp({
   prisma,

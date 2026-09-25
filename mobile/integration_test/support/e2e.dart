@@ -2,6 +2,7 @@ import 'package:convoze/app.dart';
 import 'package:convoze/core/config/app_config.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
@@ -46,10 +47,20 @@ class E2eBackend {
 
 final backend = E2eBackend();
 
+/// E2E mode's fake Verify client accepts only this code (E2E_OTP_CODE).
+const e2eOtpCode = String.fromEnvironment(
+  'E2E_OTP_CODE',
+  defaultValue: '000000',
+);
+
 /// Call once at the top of every e2e test file's `main`.
 void setUpE2e() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
-  setUp(backend.reset);
+  setUp(() async {
+    await backend.reset();
+    // Every test starts as a fresh install: no Session, no Device ID.
+    await const FlutterSecureStorage().deleteAll();
+  });
 }
 
 /// Launches the app as a cold start: a fresh ProviderScope and ConvozeApp.

@@ -1,5 +1,6 @@
 import express from 'express';
 
+import { createAuthRouter } from './auth/routes.js';
 import { createFaultInjector } from './e2e/faults.js';
 import { createE2eRouter } from './e2e/routes.js';
 import { errorHandler, notFoundHandler } from './http/errors.js';
@@ -23,8 +24,7 @@ export function createApp({ prisma, verifyClient, clock, jwtSecret, e2eMode = fa
     res.json({ status: 'ok' });
   });
 
-  // Consumed by the auth routes that land in #23 onwards.
-  app.locals.deps = { verifyClient, clock, jwtSecret };
+  app.use('/auth', createAuthRouter({ prisma, verifyClient, clock, jwtSecret }));
 
   app.use(notFoundHandler);
   app.use(errorHandler);
