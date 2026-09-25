@@ -52,4 +52,4 @@ final class SocketFactoryProvider
   }
 }
 
-String _$socketFactoryHash() => r'da6def0380f18602600ea72402aefdd4a998164a';
+String _$socketFactoryHash() => r'19af36ca6c17e57ed2036cf6ccc988168dec5005';

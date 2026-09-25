@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/connecting_banner.dart';
 import '../../auth/presentation/account_menu.dart';
 
 class ConversationsScreen extends StatelessWidget {
@@ -12,7 +13,12 @@ class ConversationsScreen extends StatelessWidget {
         title: const Text('Conversations'),
         actions: const [AccountMenu()],
       ),
-      body: const Center(child: Text('No conversations yet')),
+      body: const Column(
+        children: [
+          ConnectingBanner(),
+          Expanded(child: Center(child: Text('No conversations yet'))),
+        ],
+      ),
     );
   }
 }

@@ -77,5 +77,23 @@ export function createRealtime({ prisma, authenticate }) {
     changeConversationMembership('socketsLeave', args);
   }
 
-  return { io, registry, joinUserToConversation, removeUserFromConversation };
+  // Kills the raw transport under each of the Session's live sockets without
+  // a Socket.IO disconnect packet, so the client sees its connection die the
+  // way a dropped network does (not the way a server-initiated disconnect
+  // does) and its own reconnection logic runs, rather than being told to
+  // stop retrying.
+  function dropTransports(sessionId) {
+    for (const socketId of registry.socketsForSession(sessionId)) {
+      const socket = io.sockets.sockets.get(socketId);
+      socket?.conn.transport.socket?.terminate();
+    }
+  }
+
+  return {
+    io,
+    registry,
+    joinUserToConversation,
+    removeUserFromConversation,
+    dropTransports,
+  };
 }

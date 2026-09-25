@@ -126,6 +126,14 @@ export function createE2eRouter({
     res.json({ count: realtime.registry.socketsForSession(req.params.sessionId).length });
   });
 
+  // Drops the Session's live sockets' transports without a server-initiated
+  // disconnect, simulating a network drop so the client's own reconnect logic
+  // runs (#31).
+  router.post('/sessions/:sessionId/drop-transport', (req, res) => {
+    realtime.dropTransports(req.params.sessionId);
+    res.status(204).end();
+  });
+
   // A protected route like any other, for exercising the real auth middleware.
   router.get('/echo', authenticated, (req, res) => {
     res.json(req.auth);

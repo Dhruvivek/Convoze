@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/widgets.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
@@ -25,12 +26,23 @@ enum ConnectionStatus {
 /// with the stored access token, closes it on request, and reports its
 /// status. Features take the raw [socket] and handle their own events;
 /// nothing here parses them.
-class ConnectionManager {
-  ConnectionManager({required this._createSocket, required this._tokenStore});
+///
+/// Also owns the app-lifecycle policy (ADR 0005): backgrounding
+/// ([AppLifecycleState.paused], `.hidden`, `.detached`) disconnects
+/// deliberately, and returning to the foreground ([AppLifecycleState.resumed])
+/// reconnects. `.inactive` (e.g. a brief system UI overlay) is ignored.
+class ConnectionManager with WidgetsBindingObserver {
+  ConnectionManager({required this._createSocket, required this._tokenStore}) {
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   final SocketFactory _createSocket;
   final TokenStore _tokenStore;
   final _statusChanges = StreamController<ConnectionStatus>.broadcast();
+
+  /// Whether there's a Session to connect for. Backgrounding while this is
+  /// false (or foregrounding before it's true) does nothing.
+  bool _authenticated = false;
 
   /// Bumped by every connect and disconnect, so a connect still reading the
   /// token when it's superseded gives up.
@@ -103,7 +115,35 @@ class ConnectionManager {
     _setStatus(ConnectionStatus.offline);
   }
 
+  /// Connects or disconnects as sign-in state changes. Call with `true` on
+  /// sign-in and `false` on sign-out; this is what backgrounding while
+  /// signed out avoids trying to connect for.
+  void setAuthenticated(bool authenticated) {
+    _authenticated = authenticated;
+    if (authenticated) {
+      unawaited(connect());
+    } else {
+      disconnect();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!_authenticated) return;
+    switch (state) {
+      case AppLifecycleState.resumed:
+        unawaited(connect());
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.detached:
+        disconnect();
+      case AppLifecycleState.inactive:
+        break;
+    }
+  }
+
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     disconnect();
     _statusChanges.close();
   }
@@ -126,12 +166,18 @@ ConnectionManager connectionManager(Ref ref) {
   ref.listen(authStateProvider, (_, auth) {
     switch (auth) {
       case Authenticated():
-        unawaited(manager.connect());
+        manager.setAuthenticated(true);
       case Unauthenticated():
-        manager.disconnect();
+        manager.setAuthenticated(false);
       case Restoring():
         break;
     }
   }, fireImmediately: true);
   return manager;
 }
+
+/// The current status, then every change, for widgets like the "Connecting…"
+/// banner to watch.
+@Riverpod(keepAlive: true)
+Stream<ConnectionStatus> connectionStatus(Ref ref) =>
+    ref.watch(connectionManagerProvider).statusStream;
