@@ -1,6 +1,6 @@
 # Postgres schema & ORM
 
-**Status:** accepted
+**Status:** accepted — amended by [ADR 0008](0008-message-delivery-pipeline-update-log-and-sync-cursor.md) (delivered state reinstated as a Delivery watermark)
 
 ## Context
 

@@ -1,6 +1,6 @@
 # Push notification pipeline
 
-**Status:** accepted
+**Status:** accepted — amended by [ADR 0008](0008-message-delivery-pipeline-update-log-and-sync-cursor.md) (push on disconnect with unacked messages)
 
 ## Context
 

@@ -1,6 +1,6 @@
 # Realtime transport & Flutter-socket integration
 
-**Status:** accepted
+**Status:** accepted — amended by [ADR 0008](0008-message-delivery-pipeline-update-log-and-sync-cursor.md) (rooms no longer carry messages; one socket per Session in steady state)
 
 ## Context
 

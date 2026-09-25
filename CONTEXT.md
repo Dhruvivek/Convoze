@@ -23,3 +23,19 @@ _Avoid_: online status, connection status (that's the client's own transport sta
 **Device token**:
 A Device's registered push-delivery credential (FCM/APNs token), stored independently of that Device's Session and correlated to it only by the `(userId, deviceId)` pair — not a foreign key. A push is sent to a Device token when that Device's current Session has zero live sockets.
 _Avoid_: push token (ambiguous with the JWT access token), FCM token (names one provider; the concept spans FCM and APNs)
+
+**Delivery watermark**:
+A single marker per Participant recording the last Message that has reached at least one of their Devices (acknowledged by that Device), mirroring the Read watermark. "Delivered to N" is derived by comparing every Participant's delivery watermark against a given Message. A Participant's delivery watermark is always at or ahead of their Read watermark.
+_Avoid_: delivery receipt, delivered status (both imply a stored per-message record)
+
+**Update**:
+One durable change a User must converge on — a new, edited or deleted Message, a reaction change, a watermark move, or a membership change — positioned in that User's Update log. An Update refers to the thing that changed rather than copying it, so it always reflects the thing's current state when delivered. Typing and Presence are never Updates.
+_Avoid_: event (too broad — includes ephemeral signals), notification (that's a push)
+
+**Update log**:
+The ordered, per-User sequence of Updates, each numbered by a per-User position that only goes up. The single path by which a Device learns about durable changes, whether live or catching up after being offline. Retained for a bounded window; a Device that falls behind it must resync from a snapshot instead.
+_Avoid_: queue (implies entries are removed once delivered — Update log entries are not), inbox, feed
+
+**Sync cursor**:
+The highest Update log position a Device has durably applied locally. Held by the Device, not the server, and presented on every (re)connect to resume from.
+_Avoid_: offset, pts, since-token
