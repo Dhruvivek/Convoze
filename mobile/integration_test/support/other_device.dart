@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:convoze/core/config/app_config.dart';
+import 'package:convoze/core/storage/jwt.dart';
 import 'package:dio/dio.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:uuid/uuid.dart';
@@ -119,11 +119,8 @@ class OtherDevice {
 }
 
 /// The Session an access token belongs to, read from its (unverified) claims.
-String sessionIdOf(String accessToken) {
-  final claims = accessToken.split('.')[1];
-  final json = utf8.decode(base64Url.decode(base64Url.normalize(claims)));
-  return (jsonDecode(json) as Map<String, dynamic>)['sessionId'] as String;
-}
+String sessionIdOf(String accessToken) =>
+    jwtClaims(accessToken)['sessionId'] as String;
 
 /// The next [event] on [socket], failing after [timeout].
 Future<dynamic> nextEvent(

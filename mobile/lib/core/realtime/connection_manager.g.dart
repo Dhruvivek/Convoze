@@ -58,7 +58,7 @@ final class ConnectionManagerProvider
   }
 }
 
-String _$connectionManagerHash() => r'0fbc3038995b25493fa01492d84ce071d31ac857';
+String _$connectionManagerHash() => r'66e589afcb51533fa23d0f15c10e132030948c76';
 
 /// The current status, then every change, for widgets like the "Connecting…"
 /// banner to watch.
