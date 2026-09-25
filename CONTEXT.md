@@ -51,3 +51,15 @@ _Avoid_: pending queue, drafts (a draft is unsent text still in the composer, no
 **Conversation preferences**:
 A Participant's own settings for how a Conversation appears and notifies for them — pinned, archived, muted, hidden, and how much of its history they have cleared — visible only to that User and synced across their Devices. Never seen by other Participants, unlike watermarks.
 _Avoid_: chat settings (ambiguous with group settings every Participant sees, like the group name), chat list controls (names the UI, not the state)
+
+**Reply**:
+A Message that points at an earlier Message in the same Conversation and is shown alongside that Message as it is now — edited text, or "deleted" if it's gone — never a copy taken at reply time.
+_Avoid_: quote (implies a snapshot of the original, which is what Signal stores because its server can't see history)
+
+**Poll**:
+A question with up to 10 options, posted as a Message in a group Conversation, which Participants answer with Votes until its creator closes it. Votes are visible to every Participant, not anonymous.
+_Avoid_: survey
+
+**Vote**:
+A Participant's current choice in a Poll — at most one per Participant per Poll; voting again replaces it rather than adding a second.
+_Avoid_: answer, response (both suggest something that accumulates)
