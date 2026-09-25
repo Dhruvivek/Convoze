@@ -13,8 +13,9 @@ export function createApp({ prisma, verifyClient, clock, jwtSecret, e2eMode = fa
 
   if (e2eMode) {
     const faults = createFaultInjector();
-    app.use(faults.middleware);
+    // The router goes first so a fault can never break the test-only endpoints.
     app.use('/__e2e__', createE2eRouter({ prisma, faults }));
+    app.use(faults.middleware);
   }
 
   app.get('/health', async (_req, res) => {

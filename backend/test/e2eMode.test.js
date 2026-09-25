@@ -2,7 +2,12 @@ import { after, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
 
-import { buildTestApp, createTestPrisma, resetDatabase } from './support/testApp.js';
+import {
+  TEST_OTP_CODE,
+  buildTestApp,
+  createTestPrisma,
+  resetDatabase,
+} from './support/testApp.js';
 
 const prisma = createTestPrisma();
 after(() => prisma.$disconnect());
@@ -77,6 +82,17 @@ describe('POST /__e2e__/faults', () => {
     assert.equal(res.status, 200);
   });
 
+  it('never faults the test-only endpoints themselves', async () => {
+    const { app } = buildTestApp({ prisma, e2eMode: true });
+    await request(app)
+      .post('/__e2e__/faults')
+      .send({ method: 'POST', path: '/__e2e__/reset', count: 1 });
+
+    const res = await request(app).post('/__e2e__/reset');
+
+    assert.equal(res.status, 204);
+  });
+
   it('rejects an invalid fault definition', async () => {
     const { app } = buildTestApp({ prisma, e2eMode: true });
 
@@ -93,7 +109,7 @@ describe('fake Verify client', () => {
 
     await verifyClient.sendCode('+14155550100');
 
-    assert.equal(await verifyClient.checkCode('+14155550100', '123456'), true);
-    assert.equal(await verifyClient.checkCode('+14155550100', '000000'), false);
+    assert.equal(await verifyClient.checkCode('+14155550100', TEST_OTP_CODE), true);
+    assert.equal(await verifyClient.checkCode('+14155550100', '999999'), false);
   });
 });
