@@ -4,6 +4,7 @@ import { DEFAULT_TOKEN_TTLS } from '../auth/tokenTtls.js';
 import { sendError } from '../http/errors.js';
 import { resetDatabase } from './resetDatabase.js';
 import { seedConversation } from './seedConversation.js';
+import { seedMessages } from './seedMessages.js';
 
 // The event the emit endpoint sends, which no feature listens for.
 export const E2E_TEST_EVENT = 'e2e:test';
@@ -95,6 +96,25 @@ export function createE2eRouter({
       realtime.joinUserToConversation({ userId, conversationId: conversation.id });
     }
     res.status(201).json(conversation);
+  });
+
+  // Fast-fills a Conversation's history for the pagination e2e suite (#55):
+  // direct Prisma inserts, bypassing `message:send`/the Update log entirely
+  // (mirrors `seedConversation` above) — a Device only ever sees these
+  // through `GET .../messages`, never a live Update.
+  router.post('/conversations/:conversationId/messages/seed', async (req, res) => {
+    const { count, senderId } = req.body ?? {};
+    const result = await seedMessages(prisma, req.params.conversationId, { count, senderId });
+    if (!result) {
+      sendError(
+        res,
+        400,
+        'invalid_request',
+        'Expected { count: int > 0, senderId: uuid }',
+      );
+      return;
+    }
+    res.status(201).json(result);
   });
 
   // Removes a Participant, taking any of their live sockets out of the

@@ -6,25 +6,8 @@ import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:socket_io_client/socket_io_client.dart' as io;
-import 'package:socket_io_client/src/manager.dart';
 
-/// A socket double for the Outbox drainer: [emitWithAckAsync] returns
-/// [response] instead of touching the network, mirroring what
-/// `message:send`'s ack contract returns (`sendMessage.js`).
-class _FakeAckSocket extends io.Socket {
-  _FakeAckSocket(this.response)
-    : super(Manager(uri: 'http://fake', options: {'autoConnect': false}), '/', const {});
-
-  final Map<String, dynamic> response;
-  final sentEvents = <String>[];
-
-  @override
-  Future emitWithAckAsync(String event, dynamic data, {Function? ack, bool binary = false}) async {
-    sentEvents.add(event);
-    return response;
-  }
-}
+import '../../support/fake_ack_socket.dart';
 
 const me = 'user-me';
 const other = 'user-other';
@@ -329,7 +312,7 @@ void main() {
             createdAt: DateTime.now(),
           ),
         );
-    final socket = _FakeAckSocket({'ok': true, 'messageId': 'msg-1'});
+    final socket = FakeAckSocket({'ok': true, 'messageId': 'msg-1'});
 
     await engine.drainOutbox(socket);
 
@@ -348,11 +331,52 @@ void main() {
             createdAt: DateTime.now(),
           ),
         );
-    final socket = _FakeAckSocket({'ok': false, 'code': 'NOT_PARTICIPANT'});
+    final socket = FakeAckSocket({'ok': false, 'code': 'NOT_PARTICIPANT'});
 
     await engine.drainOutbox(socket);
 
     final row = await db.select(db.outbox).getSingle();
     expect(row.status, 'failed');
+  });
+
+  test('flushPendingReads sends a queued read and deletes it on ack', () async {
+    await db
+        .into(db.pendingReads)
+        .insert(
+          PendingReadsCompanion.insert(conversationId: 'conv-1', messageId: 'msg-1'),
+        );
+    final socket = FakeAckSocket({'ok': true});
+
+    await engine.flushPendingReads(socket);
+
+    expect(socket.sentEvents, ['conversation:read']);
+    expect(await db.select(db.pendingReads).get(), isEmpty);
+  });
+
+  test('flushPendingReads drops a rejected read rather than retrying it in place', () async {
+    await db
+        .into(db.pendingReads)
+        .insert(
+          PendingReadsCompanion.insert(conversationId: 'conv-1', messageId: 'msg-1'),
+        );
+    final socket = FakeAckSocket({'ok': false, 'code': 'NOT_FOUND'});
+
+    await engine.flushPendingReads(socket);
+
+    expect(await db.select(db.pendingReads).get(), isEmpty);
+  });
+
+  test('flushPendingReads stops (without deleting) on a timed-out ack', () async {
+    await db
+        .into(db.pendingReads)
+        .insert(
+          PendingReadsCompanion.insert(conversationId: 'conv-1', messageId: 'msg-1'),
+        );
+    final socket = TimingOutSocket();
+
+    await engine.flushPendingReads(socket);
+
+    expect(socket.sentEvents, ['conversation:read']);
+    expect(await db.select(db.pendingReads).get(), hasLength(1));
   });
 }

@@ -5,6 +5,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../features/auth/presentation/auth_state.dart';
 import '../../features/auth/presentation/otp_entry_screen.dart';
 import '../../features/auth/presentation/phone_entry_screen.dart';
+import '../../features/conversations/presentation/chat_thread_screen.dart';
 import '../../features/conversations/presentation/conversations_screen.dart';
 import 'splash_screen.dart';
 
@@ -59,6 +60,12 @@ GoRouter router(Ref ref) {
       GoRoute(
         path: '/',
         builder: (context, state) => const ConversationsScreen(),
+      ),
+      GoRoute(
+        path: '/chat/:conversationId',
+        builder: (context, state) => ChatThreadScreen(
+          conversationId: state.pathParameters['conversationId']!,
+        ),
       ),
     ],
   );

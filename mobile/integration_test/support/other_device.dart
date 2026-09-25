@@ -78,6 +78,20 @@ class OtherDevice {
     return res.statusCode!;
   }
 
+  /// `POST /conversations/direct` as this Device's User — unlike
+  /// `E2eBackend.seedConversation`, this writes `conversation.joined` to
+  /// both Users' Update logs (`directConversation.js`), so an already
+  /// connected counterpart's replica picks up the Conversation live.
+  /// Answers its id.
+  Future<String> createDirectConversationWith(String otherUserId) async {
+    final res = await _dio.post<Map<String, dynamic>>(
+      '/conversations/direct',
+      data: {'userId': otherUserId},
+      options: _authorized,
+    );
+    return res.data!['id'] as String;
+  }
+
   Options get _authorized =>
       Options(headers: {'Authorization': 'Bearer $accessToken'});
 
