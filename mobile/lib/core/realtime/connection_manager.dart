@@ -83,6 +83,14 @@ class ConnectionManager with WidgetsBindingObserver {
   final void Function() _onSessionEnded;
   final _statusChanges = StreamController<ConnectionStatus>.broadcast();
 
+  /// Every new socket instance [connect] creates, for features in
+  /// `lib/features/` to attach their own event handling to — the seam ADR
+  /// 0005 describes ("features take the raw socket and handle their own
+  /// events"), without `lib/core/` importing any of them itself. Automatic
+  /// reconnects reuse the same instance, so this doesn't fire again for them
+  /// (`SyncEngine.attach`'s own doc comment says the same).
+  final _socketCreatedController = StreamController<io.Socket>.broadcast();
+
   /// How long before its expiry an access token is treated as due for
   /// renewal, so a handshake sent just under the wire doesn't land at the
   /// server already expired.
@@ -125,6 +133,16 @@ class ConnectionManager with WidgetsBindingObserver {
     controller.onCancel = sub.cancel;
   });
 
+  /// The current socket, if any, then every new instance thereafter.
+  Stream<io.Socket> get socketCreated => Stream.multi((controller) {
+    if (_socket != null) controller.add(_socket!);
+    final sub = _socketCreatedController.stream.listen(
+      controller.add,
+      onDone: controller.close,
+    );
+    controller.onCancel = sub.cancel;
+  });
+
   /// Opens a connection unless one is open or on its way.
   Future<void> connect() async {
     if (_status != ConnectionStatus.offline) return;
@@ -149,6 +167,7 @@ class ConnectionManager with WidgetsBindingObserver {
       ..auth = (callback) => unawaited(_authenticate(generation, callback));
     _socket = socket;
     _onSocketCreated(socket);
+    _socketCreatedController.add(socket);
     void onChange(ConnectionStatus Function() next) {
       if (identical(_socket, socket)) _setStatus(next());
     }
@@ -310,6 +329,7 @@ class ConnectionManager with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     disconnect();
     _statusChanges.close();
+    _socketCreatedController.close();
   }
 
   void _setStatus(ConnectionStatus status) {

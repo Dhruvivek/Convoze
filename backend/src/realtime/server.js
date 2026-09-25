@@ -8,6 +8,7 @@ import { createSendRateLimit } from '../messaging/rateLimiter.js';
 import { createReactionToggler } from '../messaging/reactionToggle.js';
 import { createMessageSender } from '../messaging/sendMessage.js';
 import { resolveStartSeq } from '../messaging/syncState.js';
+import { createPresenceService } from './presence.js';
 import { createConnectionRegistry } from './registry.js';
 
 export const userRoom = (userId) => `user:${userId}`;
@@ -27,6 +28,7 @@ export function createRealtime({
   // The only client is the app, so no HTTP long-polling fallback.
   const io = new Server({ transports: ['websocket'] });
   const registry = createConnectionRegistry();
+  const presence = createPresenceService({ prisma, registry, clock });
 
   // Revocation reaches open sockets immediately (ADR 0005, #33): logout,
   // logout-others and refresh-token reuse detection all fire this hook.
@@ -102,12 +104,11 @@ export function createRealtime({
       auth.userId,
       socket.handshake.auth?.since,
     );
+    const conversationIds = participants.map(({ conversationId }) => conversationId);
     socket.data = {
       ...auth,
-      rooms: [
-        userRoom(auth.userId),
-        ...participants.map(({ conversationId }) => conversationRoom(conversationId)),
-      ],
+      rooms: [userRoom(auth.userId), ...conversationIds.map(conversationRoom)],
+      conversationIds,
       startSeq,
       resetSeq,
     };
@@ -115,13 +116,26 @@ export function createRealtime({
   }
 
   io.on('connection', (socket) => {
-    const { userId, sessionId, rooms, startSeq, resetSeq } = socket.data;
-    registry.register(socket.id, { userId, sessionId });
+    const { userId, sessionId, rooms, conversationIds, startSeq, resetSeq } = socket.data;
+    const { userCameOnline } = registry.register(socket.id, { userId, sessionId });
     socket.join(rooms);
     // The handshake extension (#48/ADR 0008): a Device too far behind (or
     // connecting for the first time) is told to rebuild from a snapshot and
     // resume from here, instead of the pump trying to resend a gap it can't.
     if (resetSeq !== null) socket.emit('sync:reset', { currentSeq: resetSeq });
+
+    // Presence (#34): a second Device/reconnect fires nothing (`userCameOnline`
+    // is only true on the user's 0 → 1 transition), broadcast straight to the
+    // user's own Conversation rooms rather than computing the audience twice.
+    // The snapshot is sent after auto-join, covering the connecting user's
+    // full presence audience — fire-and-forget, logged rather than failing
+    // the connection if the DB hiccups.
+    const conversationRoomNames = conversationIds.map(conversationRoom);
+    if (userCameOnline) io.to(conversationRoomNames).emit('userOnline', { userId });
+    presence.snapshotFor(userId, conversationIds).then(
+      (snapshot) => socket.emit('presenceSnapshot', snapshot),
+      (err) => console.error(err),
+    );
 
     const pump = createPump({ prisma, socket, userId, startSeq, onWake: wakeUser, ...pumpOptions });
     addPump(userId, pump);
@@ -163,7 +177,13 @@ export function createRealtime({
     socket.on('disconnect', () => {
       pump.stop();
       removePump(userId, pump);
-      registry.unregister(socket.id);
+      const { userWentOffline } = registry.unregister(socket.id);
+      if (userWentOffline) {
+        presence.markOffline(userId).then(
+          () => io.to(conversationRoomNames).emit('userOffline', { userId, lastSeenAt: clock.now() }),
+          (err) => console.error(err),
+        );
+      }
     });
   });
 
@@ -208,5 +228,8 @@ export function createRealtime({
     // #50) wake a User's connected pumps the same way every socket action
     // already does.
     wakeUser,
+    // Graceful shutdown's "write lastSeenAt for every online user" pass
+    // (#34) — called before `io.close()`.
+    presence,
   };
 }
