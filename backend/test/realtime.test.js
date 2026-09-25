@@ -5,7 +5,7 @@ import jwt from 'jsonwebtoken';
 import request from 'supertest';
 
 import { E2E_TEST_EVENT } from '../src/e2e/routes.js';
-import { signIn } from './support/auth.js';
+import { logout, logoutOthers, refresh, signIn } from './support/auth.js';
 import { connect, nextEvent, startTestServer, timedOut, waitFor } from './support/realtime.js';
 import { createTestPrisma, resetDatabase } from './support/testApp.js';
 
@@ -34,7 +34,7 @@ async function emitTo(room, payload) {
 async function connectAs(phoneNumber, deviceId) {
   const { accessToken, user } = await signIn(server.app, { phoneNumber, deviceId });
   const socket = await connect(server.client({ auth: { token: accessToken } }));
-  return { socket, userId: user.id };
+  return { socket, userId: user.id, accessToken, sessionId: jwt.decode(accessToken).sessionId };
 }
 
 function removeParticipant(conversationId, userId) {
@@ -284,5 +284,66 @@ describe('e2e live-connection endpoints', () => {
     const res = await request(server.app).post('/__e2e__/sessions/none/drop-transport');
 
     assert.equal(res.status, 204);
+  });
+});
+
+describe('session revocation reaches open sockets', () => {
+  it('logout emits sessionRevoked and force-disconnects only that Session', async () => {
+    server = await startTestServer({ prisma });
+    const revoked = await connectAs(ALICE, 'device-1');
+    const other = await connectAs(ALICE, 'device-2');
+    const bystander = await connectAs(BOB);
+
+    const sessionRevokedEvent = nextEvent(revoked.socket, 'sessionRevoked');
+    const disconnected = nextEvent(revoked.socket, 'disconnect');
+    const res = await logout(server.app, `Bearer ${revoked.accessToken}`);
+
+    assert.equal(res.status, 204);
+    assert.deepEqual(await sessionRevokedEvent, {});
+    // Server-initiated, unlike a dropped transport, so the client's own
+    // reconnect logic doesn't run (the "library check" from #33).
+    assert.equal(await disconnected, 'io server disconnect');
+    assert.equal(other.socket.connected, true);
+    assert.equal(bystander.socket.connected, true);
+  });
+
+  it('logout-others disconnects every other Session and leaves the caller alone', async () => {
+    server = await startTestServer({ prisma });
+    const caller = await connectAs(ALICE, 'device-1');
+    const other = await connectAs(ALICE, 'device-2');
+    const bystander = await connectAs(BOB);
+
+    const disconnected = nextEvent(other.socket, 'disconnect');
+    const res = await logoutOthers(server.app, `Bearer ${caller.accessToken}`);
+
+    assert.equal(res.status, 204);
+    assert.equal(await disconnected, 'io server disconnect');
+    assert.equal(caller.socket.connected, true);
+    assert.equal(bystander.socket.connected, true);
+  });
+
+  it('refresh-token reuse detection disconnects that Session', async () => {
+    server = await startTestServer({ prisma });
+    const signedIn = await signIn(server.app);
+    const socket = await connect(server.client({ auth: { token: signedIn.accessToken } }));
+    await refresh(server.app, signedIn.refreshToken);
+
+    const disconnected = nextEvent(socket, 'disconnect');
+    const res = await refresh(server.app, signedIn.refreshToken);
+
+    assert.equal(res.status, 401);
+    assert.equal(await disconnected, 'io server disconnect');
+  });
+
+  it('a reconnect with the old access token is rejected afterwards', async () => {
+    server = await startTestServer({ prisma });
+    const revoked = await connectAs(ALICE);
+
+    await logout(server.app, `Bearer ${revoked.accessToken}`);
+    await nextEvent(revoked.socket, 'disconnect');
+
+    await assert.rejects(connect(server.client({ auth: { token: revoked.accessToken } })), {
+      message: 'unauthenticated',
+    });
   });
 });

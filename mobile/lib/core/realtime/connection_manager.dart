@@ -39,6 +39,7 @@ class ConnectionManager with WidgetsBindingObserver {
     required this._createSocket,
     required this._tokenStore,
     required this._sessionRefresher,
+    required this._onSessionEnded,
   }) {
     WidgetsBinding.instance.addObserver(this);
   }
@@ -46,6 +47,10 @@ class ConnectionManager with WidgetsBindingObserver {
   final SocketFactory _createSocket;
   final TokenStore _tokenStore;
   final SessionRefresher _sessionRefresher;
+
+  /// Tells the app the Session is gone, once its tokens are already cleared
+  /// (#20's `AuthState.sessionEnded`), so the router sends it to login.
+  final void Function() _onSessionEnded;
   final _statusChanges = StreamController<ConnectionStatus>.broadcast();
 
   /// How long before its expiry an access token is treated as due for
@@ -123,7 +128,26 @@ class ConnectionManager with WidgetsBindingObserver {
         ),
       )
       ..onConnectError((data) => _onConnectError(socket, generation, data))
+      ..on('sessionRevoked', (_) => _onSessionRevoked(socket))
       ..connect();
+  }
+
+  /// The Session was revoked from elsewhere (or this Device's own logout
+  /// reaching the server first): #20's sign-out path, directly — no refresh
+  /// attempt, and no reconnect, since the server's disconnect that follows
+  /// this event is server-initiated and the library won't retry it (ADR
+  /// 0005).
+  void _onSessionRevoked(io.Socket socket) {
+    if (!identical(_socket, socket)) return;
+    disconnect();
+    unawaited(_endSession());
+  }
+
+  /// Forgets the Session (the Device ID stays) and tells the app, which
+  /// sends the user to login.
+  Future<void> _endSession() async {
+    await _tokenStore.clearSession();
+    _onSessionEnded();
   }
 
   /// Supplies the handshake's auth payload for every (re)connect attempt
@@ -241,6 +265,8 @@ ConnectionManager connectionManager(Ref ref) {
     createSocket: ref.watch(socketFactoryProvider),
     tokenStore: ref.watch(tokenStoreProvider),
     sessionRefresher: ref.watch(sessionRefresherProvider),
+    // Read when it happens, not now: auth state itself depends on Dio.
+    onSessionEnded: () => ref.read(authStateProvider.notifier).sessionEnded(),
   );
   ref.onDispose(manager.dispose);
   ref.listen(authStateProvider, (_, auth) {

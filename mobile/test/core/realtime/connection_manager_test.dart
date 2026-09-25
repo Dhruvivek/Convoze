@@ -84,6 +84,7 @@ void main() {
         tokenStore: tokenStore,
         onSessionEnded: () => sessionEndedCalls++,
       ),
+      onSessionEnded: () => sessionEndedCalls++,
     );
   });
 
@@ -222,6 +223,60 @@ void main() {
 
       manager.didChangeAppLifecycleState(AppLifecycleState.paused);
       expect(manager.status, ConnectionStatus.offline);
+    });
+  });
+
+  group('sessionRevoked (#33)', () {
+    test(
+      'clears the Session, tells the app, and does not reconnect or refresh',
+      () async {
+        await manager.connect();
+        final socket = sockets.single;
+        socket.emitReserved('connect');
+        final connectCallsBefore = socket.connectCalls;
+
+        socket.active_ = false;
+        socket.emitReserved('sessionRevoked', {});
+        await pumpEventQueue();
+
+        expect(manager.status, ConnectionStatus.offline);
+        expect(manager.socket, isNull);
+        expect(await tokenStore.readAccessToken(), isNull);
+        expect(await tokenStore.readRefreshToken(), isNull);
+        expect(sessionEndedCalls, 1);
+        expect(backend.refreshCalls, 0);
+        // No reconnect attempt on this socket, and no new one opened.
+        expect(socket.connectCalls, connectCallsBefore);
+        expect(sockets, hasLength(1));
+      },
+    );
+
+    test('keeps the Device ID', () async {
+      FlutterSecureStorage.setMockInitialValues({
+        'access_token': fakeJwt(secondsFromNow: 3600),
+        'refresh_token': 'refresh-1',
+        'device_id': 'device-1',
+      });
+      await manager.connect();
+      final socket = sockets.single;
+      socket.emitReserved('connect');
+
+      socket.emitReserved('sessionRevoked', {});
+      await pumpEventQueue();
+
+      expect(await const FlutterSecureStorage().read(key: 'device_id'), 'device-1');
+    });
+
+    test('a late event from an already-superseded socket is ignored', () async {
+      await manager.connect();
+      final socket = sockets.single;
+      socket.emitReserved('connect');
+      manager.disconnect();
+
+      socket.emitReserved('sessionRevoked', {});
+      await pumpEventQueue();
+
+      expect(sessionEndedCalls, 0);
     });
   });
 
