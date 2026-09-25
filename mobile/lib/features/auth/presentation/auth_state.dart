@@ -69,6 +69,10 @@ class AuthState extends _$AuthState {
     state = const Authenticated();
   }
 
+  /// The Session can no longer be renewed and its tokens are already gone:
+  /// back to login.
+  void sessionEnded() => state = const Unauthenticated();
+
   Future<void> signOut() async {
     await ref.read(tokenStoreProvider).clearTokens();
     state = const Unauthenticated();

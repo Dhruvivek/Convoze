@@ -2,14 +2,31 @@ import {
   formatRefreshToken,
   generateRefreshSecret,
   hashRefreshSecret,
+  parseRefreshToken,
   signAccessToken,
 } from './tokens.js';
 
-export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+function sessionExpiry(now, tokenTtls) {
+  return new Date(now.getTime() + tokenTtls.refreshTokenSeconds * 1000);
+}
+
+function issuePair({ userId, sessionId, secret }, { jwtSecret, now, tokenTtls }) {
+  return {
+    accessToken: signAccessToken(
+      { userId, sessionId },
+      { jwtSecret, now, ttlSeconds: tokenTtls.accessTokenSeconds },
+    ),
+    refreshToken: formatRefreshToken(sessionId, secret),
+  };
+}
 
 // Signs a verified phone number in on one Device: finds or creates its User
 // and opens a new Session, leaving the User's other Sessions untouched.
-export async function signIn(prisma, { phoneNumber, deviceId, platform }, { clock, jwtSecret }) {
+export async function signIn(
+  prisma,
+  { phoneNumber, deviceId, platform },
+  { clock, jwtSecret, tokenTtls },
+) {
   const now = clock.now();
   const secret = generateRefreshSecret();
 
@@ -28,7 +45,7 @@ export async function signIn(prisma, { phoneNumber, deviceId, platform }, { cloc
         platform,
         refreshTokenHash: hashRefreshSecret(secret),
         issuedAt: now,
-        expiresAt: new Date(now.getTime() + SESSION_TTL_MS),
+        expiresAt: sessionExpiry(now, tokenTtls),
         lastUsedAt: now,
       },
     });
@@ -36,8 +53,53 @@ export async function signIn(prisma, { phoneNumber, deviceId, platform }, { cloc
   });
 
   return {
-    accessToken: signAccessToken({ userId: user.id, sessionId: session.id }, { jwtSecret, now }),
-    refreshToken: formatRefreshToken(session.id, secret),
+    ...issuePair({ userId: user.id, sessionId: session.id, secret }, { jwtSecret, now, tokenTtls }),
     user: { id: user.id, phoneNumber: user.phoneNumber, displayName: user.displayName },
   };
+}
+
+// Trades a refresh token for a new pair, rotating the secret on the same
+// Session row. Null when the token can't be refreshed.
+export async function refreshSession(prisma, refreshToken, { clock, jwtSecret, tokenTtls }) {
+  const now = clock.now();
+  const parsed = parseRefreshToken(refreshToken);
+  if (!parsed) return null;
+  const { sessionId, secret } = parsed;
+  const session = await prisma.session.findUnique({ where: { id: sessionId } });
+  if (!session || session.revokedAt || session.expiresAt <= now) return null;
+  if (session.refreshTokenHash !== hashRefreshSecret(secret)) {
+    await revokeForReuse(prisma, sessionId, now);
+    return null;
+  }
+
+  // Conditional on the hash just checked, so of several concurrent refreshes
+  // with one token only the first rotates; the rest find the hash already
+  // changed, which is reuse like any other.
+  const nextSecret = generateRefreshSecret();
+  const { count } = await prisma.session.updateMany({
+    where: { id: sessionId, refreshTokenHash: session.refreshTokenHash, revokedAt: null },
+    data: {
+      refreshTokenHash: hashRefreshSecret(nextSecret),
+      lastUsedAt: now,
+      expiresAt: sessionExpiry(now, tokenTtls),
+    },
+  });
+  if (count === 0) {
+    await revokeForReuse(prisma, sessionId, now);
+    return null;
+  }
+
+  return issuePair(
+    { userId: session.userId, sessionId, secret: nextSecret },
+    { jwtSecret, now, tokenTtls },
+  );
+}
+
+// A secret that isn't the Session's current one has already been rotated
+// away, so someone else may hold the Session: end it for everyone (ADR 0003).
+async function revokeForReuse(prisma, sessionId, now) {
+  await prisma.session.updateMany({
+    where: { id: sessionId, revokedAt: null },
+    data: { revokedAt: now },
+  });
 }

@@ -46,6 +46,7 @@ This sets `E2E_MODE=true`, which:
 
 - replaces Twilio Verify with a fake that accepts only `E2E_OTP_CODE` (default `000000`);
 - mounts test-only endpoints: `POST /__e2e__/reset` empties the database, and `POST /__e2e__/faults` with `{ method, path, count, status?, code? }` makes the next `count` calls to that endpoint fail with that status and error code (503 `fault_injected` by default; e.g. 502 `otp_provider_unavailable` stands in for an SMS provider outage).
+- mounts test-only auth endpoints: `POST /__e2e__/token-ttls` with `{ accessTokenSeconds?, refreshTokenSeconds? }` shortens token lifetimes until the next reset; `GET /__e2e__/echo` sits behind the real auth middleware and answers `{ userId, sessionId }`; `GET /__e2e__/sessions/:sessionId/refresh-count` answers `{ count }` of `POST /auth/refresh` calls made for that Session.
 
 The server refuses to start in e2e mode when `NODE_ENV=production`.
 

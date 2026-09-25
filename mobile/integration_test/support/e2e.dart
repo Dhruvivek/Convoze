@@ -51,9 +51,35 @@ class E2eBackend {
   Future<void> requestOtp(String phoneNumber) =>
       _post('/auth/otp/request', data: {'phoneNumber': phoneNumber});
 
-  Future<void> _post(String path, {Object? data}) async {
+  /// Shortens token lifetimes for Sessions signed in or refreshed from now
+  /// until the next [reset].
+  Future<void> setTokenTtls({
+    int? accessTokenSeconds,
+    int? refreshTokenSeconds,
+  }) => _post(
+    '/__e2e__/token-ttls',
+    data: {
+      'accessTokenSeconds': ?accessTokenSeconds,
+      'refreshTokenSeconds': ?refreshTokenSeconds,
+    },
+  );
+
+  /// How many times `/auth/refresh` has been called for [sessionId].
+  Future<int> refreshCount(String sessionId) async {
+    final path = '/__e2e__/sessions/$sessionId/refresh-count';
+    final res = await _call(path, () => _dio.get<Map<String, dynamic>>(path));
+    return res.data!['count'] as int;
+  }
+
+  Future<void> _post(String path, {Object? data}) =>
+      _call<void>(path, () => _dio.post<void>(path, data: data));
+
+  Future<Response<T>> _call<T>(
+    String path,
+    Future<Response<T>> Function() send,
+  ) async {
     try {
-      await _dio.post<void>(path, data: data);
+      return await send();
     } on DioException catch (e) {
       throw StateError(
         'E2E backend call $path to ${_dio.options.baseUrl} failed (${e.message}). '

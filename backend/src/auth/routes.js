@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { sendError } from '../http/errors.js';
 import { releaseOtpRequest, reserveOtpRequest } from './otpRateLimit.js';
 import { normalisePhoneNumber } from './phoneNumber.js';
-import { signIn } from './sessions.js';
+import { refreshSession, signIn } from './sessions.js';
 
 const PLATFORMS = new Set(['android', 'ios']);
 
@@ -17,8 +17,10 @@ function sendInvalidPhoneNumber(res) {
   sendError(res, 400, 'invalid_phone_number', 'Not a valid phone number in international format');
 }
 
-export function createAuthRouter({ prisma, verifyClient, clock, jwtSecret }) {
+export function createAuthRouter({ prisma, verifyClient, clock, jwtSecret, tokenTtls }) {
   const router = Router();
+  // What issuing a token pair needs, on sign-in and on refresh alike.
+  const issuing = { clock, jwtSecret, tokenTtls };
 
   // Answers the same way whether or not the number belongs to a User, so it
   // can't be used to find out who is registered.
@@ -90,8 +92,22 @@ export function createAuthRouter({ prisma, verifyClient, clock, jwtSecret }) {
       return;
     }
 
-    const result = await signIn(prisma, { phoneNumber, deviceId, platform }, { clock, jwtSecret });
+    const result = await signIn(prisma, { phoneNumber, deviceId, platform }, issuing);
     res.json(result);
+  });
+
+  router.post('/refresh', async (req, res) => {
+    const refreshToken = req.body?.refreshToken;
+    if (typeof refreshToken !== 'string') {
+      sendError(res, 400, 'invalid_request', 'Expected { refreshToken }');
+      return;
+    }
+    const pair = await refreshSession(prisma, refreshToken, issuing);
+    if (!pair) {
+      sendError(res, 401, 'invalid_refresh_token', 'The Session has ended. Sign in again.');
+      return;
+    }
+    res.json(pair);
   });
 
   return router;
