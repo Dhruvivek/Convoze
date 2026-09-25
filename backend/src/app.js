@@ -80,6 +80,7 @@ export function createApp({
       authenticated,
       wakeUser: realtime.wakeUser,
       joinUserToConversation: realtime.joinUserToConversation,
+      clock,
     }),
   );
 

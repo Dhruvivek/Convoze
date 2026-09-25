@@ -40,6 +40,20 @@ class Conversations extends Table {
   /// left Conversation stays, read-only, rather than disappearing).
   BoolColumn get left => boolean().withDefault(const Constant(false))();
 
+  /// Conversation preferences (#45, ADR 0009): mirrored from the caller's own
+  /// `Participant` row on the server, never derived locally. `mutedUntil` in
+  /// the past just means "not muted" — there's no unmute job, the client
+  /// compares against now wherever it's shown.
+  DateTimeColumn get pinnedAt => dateTime().nullable()();
+  DateTimeColumn get archivedAt => dateTime().nullable()();
+  DateTimeColumn get mutedUntil => dateTime().nullable()();
+  DateTimeColumn get hiddenAt => dateTime().nullable()();
+
+  /// The newest Message id (as of the last clear) at or before which this
+  /// User's own view of the history is cut off. The sync engine deletes
+  /// local Messages at or before it as soon as it applies this.
+  TextColumn get historyClearedMessageId => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }

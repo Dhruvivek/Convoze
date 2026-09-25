@@ -32,7 +32,7 @@ class AppDatabase extends _$AppDatabase {
   /// Bump this when a table's definition changes; [migration] wipes and
   /// rebuilds everything except the Outbox, same as `sync:reset` (ADR 0009).
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(

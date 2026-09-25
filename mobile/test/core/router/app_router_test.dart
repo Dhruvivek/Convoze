@@ -36,6 +36,17 @@ final _login = find.text('Sign in');
 final _home = find.descendant(of: find.byType(AppBar), matching: find.text('Convoze'));
 final _splash = find.byType(SplashScreen);
 
+/// The Chats tab holds a live drift stream (#52). A test that ends with the
+/// signed-in app still mounted must unmount it (and pump once more) itself,
+/// so its debounced stream-close timer (drift: `StreamQueryStore
+/// .markAsClosed`) fires inside this test's fake-async zone rather than
+/// tripping flutter_test's "pending timer" check — drift's own guidance for
+/// exactly this.
+Future<void> _disposeApp(WidgetTester tester) async {
+  await tester.pumpWidget(const SizedBox());
+  await tester.pump(Duration.zero);
+}
+
 void main() {
   // The gated store holds back the refresh token; the rest of a Session is
   // stored as usual.
@@ -66,6 +77,7 @@ void main() {
     expect(_home, findsOneWidget);
     expect(_splash, findsNothing);
     expect(_login, findsNothing);
+    await _disposeApp(tester);
   });
 
   testWidgets('goes from splash to login when nothing is stored', (

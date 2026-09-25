@@ -19,6 +19,60 @@ export async function hydrateUsers(prisma, userIds) {
   return prisma.user.findMany({ where: { id: { in: userIds } }, select: USER_SELECT });
 }
 
+// A single Conversation row, hydrated exactly as `listConversations.js`
+// hydrates one of its rows, plus the caller's Conversation preferences (#45)
+// — the one hydrator both a `conversation.prefs` Update and the three
+// preference-writing endpoints (`conversationPrefs.js`) read from, so the
+// history-cleared filter only has to be applied in one place (inside
+// `unreadCountFor` and here). Returns `null` when `userId` isn't a current
+// or former Participant of `conversationId`.
+export async function hydrateConversationForUser(prisma, conversationId, userId) {
+  const participant = await prisma.participant.findUnique({
+    where: { conversationId_userId: { conversationId, userId } },
+  });
+  if (!participant) return null;
+
+  const [conversation, members, rawLastMessage] = await Promise.all([
+    prisma.conversation.findUnique({ where: { id: conversationId } }),
+    prisma.participant.findMany({ where: { conversationId } }),
+    prisma.message.findFirst({ where: { conversationId }, orderBy: { id: 'desc' } }),
+  ]);
+
+  const clearedId = participant.historyClearedMessageId;
+  const lastMessage = rawLastMessage && (!clearedId || rawLastMessage.id > clearedId) ? rawLastMessage : null;
+
+  const referencedUserIds = new Set(members.map((m) => m.userId));
+  if (lastMessage && !lastMessage.isDeleted) referencedUserIds.add(lastMessage.senderId);
+
+  const [unreadCount, users] = await Promise.all([
+    unreadCountFor(prisma, conversationId, participant),
+    hydrateUsers(prisma, [...referencedUserIds]),
+  ]);
+
+  return {
+    conversationRow: {
+      id: conversation.id,
+      type: conversation.type,
+      name: conversation.name,
+      participants: members.map((m) => ({ userId: m.userId, role: m.role })),
+      lastMessage: lastMessage ? messagePayload(lastMessage) : null,
+      unreadCount,
+      readWatermarks: members.map((m) => ({ userId: m.userId, messageId: m.lastReadMessageId })),
+      deliveryWatermarks: members.map((m) => ({
+        userId: m.userId,
+        messageId: m.lastDeliveredMessageId,
+      })),
+      left: participant.leftAt !== null,
+      pinnedAt: participant.pinnedAt,
+      archivedAt: participant.archivedAt,
+      mutedUntil: participant.mutedUntil,
+      hiddenAt: participant.hiddenAt,
+      historyClearedMessageId: participant.historyClearedMessageId,
+    },
+    users,
+  };
+}
+
 // Turns a batch of UserUpdate rows into their payloads as of now (ADR
 // 0008's Hydrator table) plus the `users` side-list every payload refers to
 // (ADR 0009). References, not copies: an edit or delete committed after the
@@ -98,6 +152,14 @@ export async function hydrateUpdates(prisma, rows) {
       }
       case UPDATE_KINDS.CONVERSATION_JOINED: {
         payload = { ...conversationById.get(row.conversationId) };
+        break;
+      }
+      case UPDATE_KINDS.CONVERSATION_PREFS: {
+        const hydrated = await hydrateConversationForUser(prisma, row.conversationId, row.userId);
+        payload = hydrated ? hydrated.conversationRow : null;
+        if (payload) {
+          for (const member of payload.participants) referencedUserIds.add(member.userId);
+        }
         break;
       }
       default:

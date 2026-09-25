@@ -5,7 +5,12 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../features/auth/presentation/auth_state.dart';
 import '../../features/auth/presentation/otp_entry_screen.dart';
 import '../../features/auth/presentation/phone_entry_screen.dart';
-import '../../features/conversations/presentation/conversations_screen.dart';
+import '../../features/conversations/presentation/archived_conversations_screen.dart';
+import '../../features/conversations/presentation/chat_thread_screen.dart';
+import '../../features/conversations/presentation/contact_info_screen.dart';
+import '../../features/conversations/presentation/new_conversation_screen.dart';
+import '../../features/conversations/presentation/search_conversations_screen.dart';
+import '../../features/home/presentation/home_shell.dart';
 import 'splash_screen.dart';
 
 part 'app_router.g.dart';
@@ -58,7 +63,37 @@ GoRouter router(Ref ref) {
       ),
       GoRoute(
         path: '/',
-        builder: (context, state) => const ConversationsScreen(),
+        builder: (context, state) => const HomeShell(),
+        routes: [
+          GoRoute(
+            path: 'new',
+            builder: (context, state) => const NewConversationScreen(),
+          ),
+          GoRoute(
+            path: 'search',
+            builder: (context, state) => const SearchConversationsScreen(),
+          ),
+          GoRoute(
+            path: 'archived',
+            builder: (context, state) => const ArchivedConversationsScreen(),
+          ),
+          GoRoute(
+            path: 'thread/:id',
+            builder: (context, state) => ChatThreadScreen(
+              conversationId: state.pathParameters['id']!,
+              title: state.extra as String?,
+            ),
+            routes: [
+              GoRoute(
+                path: 'info',
+                builder: (context, state) => ContactInfoScreen(
+                  conversationId: state.pathParameters['id']!,
+                  title: state.extra as String? ?? 'Conversation',
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     ],
   );

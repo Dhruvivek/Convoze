@@ -84,7 +84,7 @@ export function createMessageSender({ prisma, rateLimiter, onWake, onMessageComm
 
     const participants = await prisma.participant.findMany({
       where: { conversationId },
-      select: { userId: true },
+      select: { userId: true, hiddenAt: true },
     });
 
     let message;
@@ -101,17 +101,34 @@ export function createMessageSender({ prisma, rateLimiter, onWake, onMessageComm
               linkPreview: normalizedLinkPreview,
             },
           });
+          // A Conversation this Participant deleted (#45) reappears — with
+          // only this and later Messages, since the watermark stays put —
+          // the moment someone writes into it again.
+          const hiddenRecipientIds = participants
+            .filter((p) => p.hiddenAt !== null)
+            .map((p) => p.userId);
+          if (hiddenRecipientIds.length > 0) {
+            await tx.participant.updateMany({
+              where: { conversationId, userId: { in: hiddenRecipientIds } },
+              data: { hiddenAt: null },
+            });
+          }
+
           // The sender's own log gets `message.new` too (ADR 0008), in the
           // same transaction as every other Participant.
-          await writeUpdatesInTx(
-            tx,
-            participants.map(({ userId: recipientId }) => ({
+          await writeUpdatesInTx(tx, [
+            ...participants.map(({ userId: recipientId }) => ({
               userId: recipientId,
               kind: UPDATE_KINDS.MESSAGE_NEW,
               conversationId,
               messageId: created.id,
             })),
-          );
+            ...hiddenRecipientIds.map((recipientId) => ({
+              userId: recipientId,
+              kind: UPDATE_KINDS.CONVERSATION_PREFS,
+              conversationId,
+            })),
+          ]);
           return created;
         },
         { timeout: 20_000, maxWait: 10_000 },

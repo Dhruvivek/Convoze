@@ -123,6 +123,18 @@ model Participant {
   // current when they left instead of the conversation's latest.
   leftAt DateTime? @db.Timestamptz(3)
 
+  // Conversation preferences (#45; ADR 0009 amending ADR 0004): this
+  // Participant's own view of the Conversation, visible only to them and
+  // never seen by anyone else in it. `mutedUntil` uses a far-future
+  // sentinel for "always". `historyClearedMessageId` is the watermark below
+  // (and including) which Messages are hidden from this Participant only.
+  pinnedAt                DateTime? @db.Timestamptz(3)
+  archivedAt              DateTime? @db.Timestamptz(3)
+  mutedUntil              DateTime? @db.Timestamptz(3)
+  hiddenAt                DateTime? @db.Timestamptz(3)
+  historyClearedMessageId String?   @db.Uuid
+  historyClearedMessage   Message?  @relation("ParticipantHistoryCleared", fields: [historyClearedMessageId], references: [id], onDelete: SetNull)
+
   @@unique([conversationId, userId])
   @@index([userId])
 }
@@ -156,6 +168,7 @@ model Message {
   userUpdates          UserUpdate[]
   readWatermarkOf      Participant[] @relation("ParticipantReadWatermark")
   deliveredWatermarkOf Participant[] @relation("ParticipantDeliveredWatermark")
+  historyClearedFor    Participant[] @relation("ParticipantHistoryCleared")
 
   @@unique([senderId, clientMsgId])
   @@index([conversationId, createdAt])

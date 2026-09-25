@@ -1,5 +1,4 @@
 import 'package:dio/dio.dart';
-import 'package:drift/drift.dart';
 
 import '../db/database.dart';
 import 'wire.dart';
@@ -30,7 +29,7 @@ Future<void> rebuildSnapshotFromRest({
     await upsertUsers(db, (body['users'] as List?) ?? const []);
     for (final raw in (body['conversations'] as List)) {
       final json = (raw as Map).cast<String, dynamic>();
-      await _upsertConversationRow(db, json);
+      await upsertConversationRow(db, json);
       conversationIds.add(json['id'] as String);
     }
     cursor = body['nextCursor'] as String?;
@@ -49,51 +48,4 @@ Future<void> rebuildSnapshotFromRest({
   }
 
   await db.writeCursor(currentSeq);
-}
-
-Future<void> _upsertConversationRow(AppDatabase db, Map<String, dynamic> json) async {
-  final id = json['id'] as String;
-  await db
-      .into(db.conversations)
-      .insertOnConflictUpdate(
-        ConversationsCompanion.insert(
-          id: id,
-          type: json['type'] as String,
-          name: Value(json['name'] as String?),
-          unreadCount: Value(json['unreadCount'] as int? ?? 0),
-          left: Value(json['left'] as bool? ?? false),
-        ),
-      );
-
-  final lastMessage = json['lastMessage'];
-  if (lastMessage != null) {
-    await upsertMessagePayload(db, (lastMessage as Map).cast<String, dynamic>());
-  }
-
-  final roles = <String, String>{
-    for (final p in (json['participants'] as List))
-      (p as Map)['userId'] as String: p['role'] as String,
-  };
-  final readWatermarks = <String, String?>{
-    for (final w in (json['readWatermarks'] as List? ?? const []))
-      (w as Map)['userId'] as String: w['messageId'] as String?,
-  };
-  final deliveryWatermarks = <String, String?>{
-    for (final w in (json['deliveryWatermarks'] as List? ?? const []))
-      (w as Map)['userId'] as String: w['messageId'] as String?,
-  };
-
-  for (final userId in roles.keys) {
-    await db
-        .into(db.participants)
-        .insertOnConflictUpdate(
-          ParticipantsCompanion.insert(
-            conversationId: id,
-            userId: userId,
-            role: Value(roles[userId]!),
-            lastReadMessageId: Value(readWatermarks[userId]),
-            lastDeliveredMessageId: Value(deliveryWatermarks[userId]),
-          ),
-        );
-  }
 }

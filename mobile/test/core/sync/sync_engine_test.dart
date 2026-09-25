@@ -318,6 +318,86 @@ void main() {
     expect(participants.map((p) => p.userId).toSet(), {me, other});
   });
 
+  test('conversation.prefs upserts the preference fields', () async {
+    await engine.applyBatch({
+      'users': [],
+      'updates': [
+        update(
+          seq: 1,
+          kind: 'conversation.prefs',
+          payload: {
+            'id': 'conv-1',
+            'pinnedAt': '2026-01-02T00:00:00.000Z',
+            'archivedAt': null,
+            'mutedUntil': '2026-01-03T00:00:00.000Z',
+            'hiddenAt': null,
+            'historyClearedMessageId': null,
+            'unreadCount': 3,
+          },
+        ),
+      ],
+    });
+
+    final conversation = await (db.select(
+      db.conversations,
+    )..where((t) => t.id.equals('conv-1'))).getSingle();
+    expect(
+      conversation.pinnedAt!.isAtSameMomentAs(DateTime.parse('2026-01-02T00:00:00.000Z')),
+      isTrue,
+    );
+    expect(
+      conversation.mutedUntil!.isAtSameMomentAs(DateTime.parse('2026-01-03T00:00:00.000Z')),
+      isTrue,
+    );
+    expect(conversation.archivedAt, isNull);
+    expect(conversation.unreadCount, 3);
+  });
+
+  test('conversation.prefs deletes local messages at or before the cleared watermark', () async {
+    await engine.applyBatch({
+      'users': [],
+      'updates': [
+        update(
+          seq: 1,
+          kind: 'message.new',
+          payload: messagePayload(id: 'msg-1', conversationId: 'conv-1', senderId: other),
+        ),
+        update(
+          seq: 2,
+          kind: 'message.new',
+          payload: messagePayload(id: 'msg-2', conversationId: 'conv-1', senderId: other),
+        ),
+      ],
+    });
+
+    await engine.applyBatch({
+      'users': [],
+      'updates': [
+        update(
+          seq: 3,
+          kind: 'conversation.prefs',
+          payload: {
+            'id': 'conv-1',
+            'pinnedAt': null,
+            'archivedAt': null,
+            'mutedUntil': null,
+            'hiddenAt': null,
+            'historyClearedMessageId': 'msg-1',
+          },
+        ),
+      ],
+    });
+
+    final remaining = await (db.select(
+      db.messages,
+    )..where((t) => t.conversationId.equals('conv-1'))).get();
+    expect(remaining.map((m) => m.id), ['msg-2']);
+    final conversation = await (db.select(
+      db.conversations,
+    )..where((t) => t.id.equals('conv-1'))).getSingle();
+    expect(conversation.historyClearedMessageId, 'msg-1');
+  });
+
   test('the Outbox drainer sends a queued message and removes it on success', () async {
     await db
         .into(db.outbox)

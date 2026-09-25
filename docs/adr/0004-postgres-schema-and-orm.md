@@ -36,7 +36,13 @@ Conversation
 
 Participant
  ├─ id (uuidv7 pk), conversationId (fk Conversation), userId (fk User),
- │  role (admin | member), lastReadMessageId (nullable fk Message), joinedAt
+ │  role (admin | member), joinedAt,
+ │  lastReadMessageId (nullable fk Message), lastDeliveredMessageId (nullable fk Message),
+ │  leftAt (nullable),
+ │  pinnedAt (nullable), archivedAt (nullable), mutedUntil (nullable),
+ │  hiddenAt (nullable), historyClearedMessageId (nullable fk Message)
+ │  — the last five are Conversation preferences (ADR 0009), visible only to
+ │  this Participant
 
 Message
  ├─ id (uuidv7 pk), conversationId (fk Conversation), senderId (fk User),

@@ -409,6 +409,61 @@ class $ConversationsTable extends Conversations
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _pinnedAtMeta = const VerificationMeta(
+    'pinnedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> pinnedAt = GeneratedColumn<DateTime>(
+    'pinned_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _archivedAtMeta = const VerificationMeta(
+    'archivedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> archivedAt = GeneratedColumn<DateTime>(
+    'archived_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _mutedUntilMeta = const VerificationMeta(
+    'mutedUntil',
+  );
+  @override
+  late final GeneratedColumn<DateTime> mutedUntil = GeneratedColumn<DateTime>(
+    'muted_until',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _hiddenAtMeta = const VerificationMeta(
+    'hiddenAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> hiddenAt = GeneratedColumn<DateTime>(
+    'hidden_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _historyClearedMessageIdMeta =
+      const VerificationMeta('historyClearedMessageId');
+  @override
+  late final GeneratedColumn<String> historyClearedMessageId =
+      GeneratedColumn<String>(
+        'history_cleared_message_id',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -418,6 +473,11 @@ class $ConversationsTable extends Conversations
     createdAt,
     unreadCount,
     left,
+    pinnedAt,
+    archivedAt,
+    mutedUntil,
+    hiddenAt,
+    historyClearedMessageId,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -480,6 +540,39 @@ class $ConversationsTable extends Conversations
         left.isAcceptableOrUnknown(data['left']!, _leftMeta),
       );
     }
+    if (data.containsKey('pinned_at')) {
+      context.handle(
+        _pinnedAtMeta,
+        pinnedAt.isAcceptableOrUnknown(data['pinned_at']!, _pinnedAtMeta),
+      );
+    }
+    if (data.containsKey('archived_at')) {
+      context.handle(
+        _archivedAtMeta,
+        archivedAt.isAcceptableOrUnknown(data['archived_at']!, _archivedAtMeta),
+      );
+    }
+    if (data.containsKey('muted_until')) {
+      context.handle(
+        _mutedUntilMeta,
+        mutedUntil.isAcceptableOrUnknown(data['muted_until']!, _mutedUntilMeta),
+      );
+    }
+    if (data.containsKey('hidden_at')) {
+      context.handle(
+        _hiddenAtMeta,
+        hiddenAt.isAcceptableOrUnknown(data['hidden_at']!, _hiddenAtMeta),
+      );
+    }
+    if (data.containsKey('history_cleared_message_id')) {
+      context.handle(
+        _historyClearedMessageIdMeta,
+        historyClearedMessageId.isAcceptableOrUnknown(
+          data['history_cleared_message_id']!,
+          _historyClearedMessageIdMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -517,6 +610,26 @@ class $ConversationsTable extends Conversations
         DriftSqlType.bool,
         data['${effectivePrefix}left'],
       )!,
+      pinnedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}pinned_at'],
+      ),
+      archivedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}archived_at'],
+      ),
+      mutedUntil: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}muted_until'],
+      ),
+      hiddenAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}hidden_at'],
+      ),
+      historyClearedMessageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}history_cleared_message_id'],
+      ),
     );
   }
 
@@ -543,6 +656,20 @@ class Conversation extends DataClass implements Insertable<Conversation> {
   /// Set once this User's Participant row carries a `leftAt` (ADR 0009: a
   /// left Conversation stays, read-only, rather than disappearing).
   final bool left;
+
+  /// Conversation preferences (#45, ADR 0009): mirrored from the caller's own
+  /// `Participant` row on the server, never derived locally. `mutedUntil` in
+  /// the past just means "not muted" — there's no unmute job, the client
+  /// compares against now wherever it's shown.
+  final DateTime? pinnedAt;
+  final DateTime? archivedAt;
+  final DateTime? mutedUntil;
+  final DateTime? hiddenAt;
+
+  /// The newest Message id (as of the last clear) at or before which this
+  /// User's own view of the history is cut off. The sync engine deletes
+  /// local Messages at or before it as soon as it applies this.
+  final String? historyClearedMessageId;
   const Conversation({
     required this.id,
     required this.type,
@@ -551,6 +678,11 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     this.createdAt,
     required this.unreadCount,
     required this.left,
+    this.pinnedAt,
+    this.archivedAt,
+    this.mutedUntil,
+    this.hiddenAt,
+    this.historyClearedMessageId,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -568,6 +700,23 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     }
     map['unread_count'] = Variable<int>(unreadCount);
     map['left'] = Variable<bool>(left);
+    if (!nullToAbsent || pinnedAt != null) {
+      map['pinned_at'] = Variable<DateTime>(pinnedAt);
+    }
+    if (!nullToAbsent || archivedAt != null) {
+      map['archived_at'] = Variable<DateTime>(archivedAt);
+    }
+    if (!nullToAbsent || mutedUntil != null) {
+      map['muted_until'] = Variable<DateTime>(mutedUntil);
+    }
+    if (!nullToAbsent || hiddenAt != null) {
+      map['hidden_at'] = Variable<DateTime>(hiddenAt);
+    }
+    if (!nullToAbsent || historyClearedMessageId != null) {
+      map['history_cleared_message_id'] = Variable<String>(
+        historyClearedMessageId,
+      );
+    }
     return map;
   }
 
@@ -584,6 +733,21 @@ class Conversation extends DataClass implements Insertable<Conversation> {
           : Value(createdAt),
       unreadCount: Value(unreadCount),
       left: Value(left),
+      pinnedAt: pinnedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pinnedAt),
+      archivedAt: archivedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(archivedAt),
+      mutedUntil: mutedUntil == null && nullToAbsent
+          ? const Value.absent()
+          : Value(mutedUntil),
+      hiddenAt: hiddenAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(hiddenAt),
+      historyClearedMessageId: historyClearedMessageId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(historyClearedMessageId),
     );
   }
 
@@ -600,6 +764,13 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       createdAt: serializer.fromJson<DateTime?>(json['createdAt']),
       unreadCount: serializer.fromJson<int>(json['unreadCount']),
       left: serializer.fromJson<bool>(json['left']),
+      pinnedAt: serializer.fromJson<DateTime?>(json['pinnedAt']),
+      archivedAt: serializer.fromJson<DateTime?>(json['archivedAt']),
+      mutedUntil: serializer.fromJson<DateTime?>(json['mutedUntil']),
+      hiddenAt: serializer.fromJson<DateTime?>(json['hiddenAt']),
+      historyClearedMessageId: serializer.fromJson<String?>(
+        json['historyClearedMessageId'],
+      ),
     );
   }
   @override
@@ -613,6 +784,13 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       'createdAt': serializer.toJson<DateTime?>(createdAt),
       'unreadCount': serializer.toJson<int>(unreadCount),
       'left': serializer.toJson<bool>(left),
+      'pinnedAt': serializer.toJson<DateTime?>(pinnedAt),
+      'archivedAt': serializer.toJson<DateTime?>(archivedAt),
+      'mutedUntil': serializer.toJson<DateTime?>(mutedUntil),
+      'hiddenAt': serializer.toJson<DateTime?>(hiddenAt),
+      'historyClearedMessageId': serializer.toJson<String?>(
+        historyClearedMessageId,
+      ),
     };
   }
 
@@ -624,6 +802,11 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     Value<DateTime?> createdAt = const Value.absent(),
     int? unreadCount,
     bool? left,
+    Value<DateTime?> pinnedAt = const Value.absent(),
+    Value<DateTime?> archivedAt = const Value.absent(),
+    Value<DateTime?> mutedUntil = const Value.absent(),
+    Value<DateTime?> hiddenAt = const Value.absent(),
+    Value<String?> historyClearedMessageId = const Value.absent(),
   }) => Conversation(
     id: id ?? this.id,
     type: type ?? this.type,
@@ -632,6 +815,13 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     createdAt: createdAt.present ? createdAt.value : this.createdAt,
     unreadCount: unreadCount ?? this.unreadCount,
     left: left ?? this.left,
+    pinnedAt: pinnedAt.present ? pinnedAt.value : this.pinnedAt,
+    archivedAt: archivedAt.present ? archivedAt.value : this.archivedAt,
+    mutedUntil: mutedUntil.present ? mutedUntil.value : this.mutedUntil,
+    hiddenAt: hiddenAt.present ? hiddenAt.value : this.hiddenAt,
+    historyClearedMessageId: historyClearedMessageId.present
+        ? historyClearedMessageId.value
+        : this.historyClearedMessageId,
   );
   Conversation copyWithCompanion(ConversationsCompanion data) {
     return Conversation(
@@ -646,6 +836,17 @@ class Conversation extends DataClass implements Insertable<Conversation> {
           ? data.unreadCount.value
           : this.unreadCount,
       left: data.left.present ? data.left.value : this.left,
+      pinnedAt: data.pinnedAt.present ? data.pinnedAt.value : this.pinnedAt,
+      archivedAt: data.archivedAt.present
+          ? data.archivedAt.value
+          : this.archivedAt,
+      mutedUntil: data.mutedUntil.present
+          ? data.mutedUntil.value
+          : this.mutedUntil,
+      hiddenAt: data.hiddenAt.present ? data.hiddenAt.value : this.hiddenAt,
+      historyClearedMessageId: data.historyClearedMessageId.present
+          ? data.historyClearedMessageId.value
+          : this.historyClearedMessageId,
     );
   }
 
@@ -658,14 +859,31 @@ class Conversation extends DataClass implements Insertable<Conversation> {
           ..write('createdById: $createdById, ')
           ..write('createdAt: $createdAt, ')
           ..write('unreadCount: $unreadCount, ')
-          ..write('left: $left')
+          ..write('left: $left, ')
+          ..write('pinnedAt: $pinnedAt, ')
+          ..write('archivedAt: $archivedAt, ')
+          ..write('mutedUntil: $mutedUntil, ')
+          ..write('hiddenAt: $hiddenAt, ')
+          ..write('historyClearedMessageId: $historyClearedMessageId')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, type, name, createdById, createdAt, unreadCount, left);
+  int get hashCode => Object.hash(
+    id,
+    type,
+    name,
+    createdById,
+    createdAt,
+    unreadCount,
+    left,
+    pinnedAt,
+    archivedAt,
+    mutedUntil,
+    hiddenAt,
+    historyClearedMessageId,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -676,7 +894,12 @@ class Conversation extends DataClass implements Insertable<Conversation> {
           other.createdById == this.createdById &&
           other.createdAt == this.createdAt &&
           other.unreadCount == this.unreadCount &&
-          other.left == this.left);
+          other.left == this.left &&
+          other.pinnedAt == this.pinnedAt &&
+          other.archivedAt == this.archivedAt &&
+          other.mutedUntil == this.mutedUntil &&
+          other.hiddenAt == this.hiddenAt &&
+          other.historyClearedMessageId == this.historyClearedMessageId);
 }
 
 class ConversationsCompanion extends UpdateCompanion<Conversation> {
@@ -687,6 +910,11 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
   final Value<DateTime?> createdAt;
   final Value<int> unreadCount;
   final Value<bool> left;
+  final Value<DateTime?> pinnedAt;
+  final Value<DateTime?> archivedAt;
+  final Value<DateTime?> mutedUntil;
+  final Value<DateTime?> hiddenAt;
+  final Value<String?> historyClearedMessageId;
   final Value<int> rowid;
   const ConversationsCompanion({
     this.id = const Value.absent(),
@@ -696,6 +924,11 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     this.createdAt = const Value.absent(),
     this.unreadCount = const Value.absent(),
     this.left = const Value.absent(),
+    this.pinnedAt = const Value.absent(),
+    this.archivedAt = const Value.absent(),
+    this.mutedUntil = const Value.absent(),
+    this.hiddenAt = const Value.absent(),
+    this.historyClearedMessageId = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   ConversationsCompanion.insert({
@@ -706,6 +939,11 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     this.createdAt = const Value.absent(),
     this.unreadCount = const Value.absent(),
     this.left = const Value.absent(),
+    this.pinnedAt = const Value.absent(),
+    this.archivedAt = const Value.absent(),
+    this.mutedUntil = const Value.absent(),
+    this.hiddenAt = const Value.absent(),
+    this.historyClearedMessageId = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        type = Value(type);
@@ -717,6 +955,11 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     Expression<DateTime>? createdAt,
     Expression<int>? unreadCount,
     Expression<bool>? left,
+    Expression<DateTime>? pinnedAt,
+    Expression<DateTime>? archivedAt,
+    Expression<DateTime>? mutedUntil,
+    Expression<DateTime>? hiddenAt,
+    Expression<String>? historyClearedMessageId,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -727,6 +970,12 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
       if (createdAt != null) 'created_at': createdAt,
       if (unreadCount != null) 'unread_count': unreadCount,
       if (left != null) 'left': left,
+      if (pinnedAt != null) 'pinned_at': pinnedAt,
+      if (archivedAt != null) 'archived_at': archivedAt,
+      if (mutedUntil != null) 'muted_until': mutedUntil,
+      if (hiddenAt != null) 'hidden_at': hiddenAt,
+      if (historyClearedMessageId != null)
+        'history_cleared_message_id': historyClearedMessageId,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -739,6 +988,11 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     Value<DateTime?>? createdAt,
     Value<int>? unreadCount,
     Value<bool>? left,
+    Value<DateTime?>? pinnedAt,
+    Value<DateTime?>? archivedAt,
+    Value<DateTime?>? mutedUntil,
+    Value<DateTime?>? hiddenAt,
+    Value<String?>? historyClearedMessageId,
     Value<int>? rowid,
   }) {
     return ConversationsCompanion(
@@ -749,6 +1003,12 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
       createdAt: createdAt ?? this.createdAt,
       unreadCount: unreadCount ?? this.unreadCount,
       left: left ?? this.left,
+      pinnedAt: pinnedAt ?? this.pinnedAt,
+      archivedAt: archivedAt ?? this.archivedAt,
+      mutedUntil: mutedUntil ?? this.mutedUntil,
+      hiddenAt: hiddenAt ?? this.hiddenAt,
+      historyClearedMessageId:
+          historyClearedMessageId ?? this.historyClearedMessageId,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -777,6 +1037,23 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     if (left.present) {
       map['left'] = Variable<bool>(left.value);
     }
+    if (pinnedAt.present) {
+      map['pinned_at'] = Variable<DateTime>(pinnedAt.value);
+    }
+    if (archivedAt.present) {
+      map['archived_at'] = Variable<DateTime>(archivedAt.value);
+    }
+    if (mutedUntil.present) {
+      map['muted_until'] = Variable<DateTime>(mutedUntil.value);
+    }
+    if (hiddenAt.present) {
+      map['hidden_at'] = Variable<DateTime>(hiddenAt.value);
+    }
+    if (historyClearedMessageId.present) {
+      map['history_cleared_message_id'] = Variable<String>(
+        historyClearedMessageId.value,
+      );
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -793,6 +1070,11 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
           ..write('createdAt: $createdAt, ')
           ..write('unreadCount: $unreadCount, ')
           ..write('left: $left, ')
+          ..write('pinnedAt: $pinnedAt, ')
+          ..write('archivedAt: $archivedAt, ')
+          ..write('mutedUntil: $mutedUntil, ')
+          ..write('hiddenAt: $hiddenAt, ')
+          ..write('historyClearedMessageId: $historyClearedMessageId, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3151,6 +3433,11 @@ typedef $$ConversationsTableCreateCompanionBuilder =
       Value<DateTime?> createdAt,
       Value<int> unreadCount,
       Value<bool> left,
+      Value<DateTime?> pinnedAt,
+      Value<DateTime?> archivedAt,
+      Value<DateTime?> mutedUntil,
+      Value<DateTime?> hiddenAt,
+      Value<String?> historyClearedMessageId,
       Value<int> rowid,
     });
 typedef $$ConversationsTableUpdateCompanionBuilder =
@@ -3162,6 +3449,11 @@ typedef $$ConversationsTableUpdateCompanionBuilder =
       Value<DateTime?> createdAt,
       Value<int> unreadCount,
       Value<bool> left,
+      Value<DateTime?> pinnedAt,
+      Value<DateTime?> archivedAt,
+      Value<DateTime?> mutedUntil,
+      Value<DateTime?> hiddenAt,
+      Value<String?> historyClearedMessageId,
       Value<int> rowid,
     });
 
@@ -3206,6 +3498,31 @@ class $$ConversationsTableFilterComposer
 
   ColumnFilters<bool> get left => $composableBuilder(
     column: $table.left,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get pinnedAt => $composableBuilder(
+    column: $table.pinnedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get archivedAt => $composableBuilder(
+    column: $table.archivedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get mutedUntil => $composableBuilder(
+    column: $table.mutedUntil,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get hiddenAt => $composableBuilder(
+    column: $table.hiddenAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get historyClearedMessageId => $composableBuilder(
+    column: $table.historyClearedMessageId,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -3253,6 +3570,31 @@ class $$ConversationsTableOrderingComposer
     column: $table.left,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<DateTime> get pinnedAt => $composableBuilder(
+    column: $table.pinnedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get archivedAt => $composableBuilder(
+    column: $table.archivedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get mutedUntil => $composableBuilder(
+    column: $table.mutedUntil,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get hiddenAt => $composableBuilder(
+    column: $table.hiddenAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get historyClearedMessageId => $composableBuilder(
+    column: $table.historyClearedMessageId,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$ConversationsTableAnnotationComposer
@@ -3288,6 +3630,27 @@ class $$ConversationsTableAnnotationComposer
 
   GeneratedColumn<bool> get left =>
       $composableBuilder(column: $table.left, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get pinnedAt =>
+      $composableBuilder(column: $table.pinnedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get archivedAt => $composableBuilder(
+    column: $table.archivedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get mutedUntil => $composableBuilder(
+    column: $table.mutedUntil,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get hiddenAt =>
+      $composableBuilder(column: $table.hiddenAt, builder: (column) => column);
+
+  GeneratedColumn<String> get historyClearedMessageId => $composableBuilder(
+    column: $table.historyClearedMessageId,
+    builder: (column) => column,
+  );
 }
 
 class $$ConversationsTableTableManager
@@ -3328,6 +3691,11 @@ class $$ConversationsTableTableManager
                 Value<DateTime?> createdAt = const Value.absent(),
                 Value<int> unreadCount = const Value.absent(),
                 Value<bool> left = const Value.absent(),
+                Value<DateTime?> pinnedAt = const Value.absent(),
+                Value<DateTime?> archivedAt = const Value.absent(),
+                Value<DateTime?> mutedUntil = const Value.absent(),
+                Value<DateTime?> hiddenAt = const Value.absent(),
+                Value<String?> historyClearedMessageId = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ConversationsCompanion(
                 id: id,
@@ -3337,6 +3705,11 @@ class $$ConversationsTableTableManager
                 createdAt: createdAt,
                 unreadCount: unreadCount,
                 left: left,
+                pinnedAt: pinnedAt,
+                archivedAt: archivedAt,
+                mutedUntil: mutedUntil,
+                hiddenAt: hiddenAt,
+                historyClearedMessageId: historyClearedMessageId,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -3348,6 +3721,11 @@ class $$ConversationsTableTableManager
                 Value<DateTime?> createdAt = const Value.absent(),
                 Value<int> unreadCount = const Value.absent(),
                 Value<bool> left = const Value.absent(),
+                Value<DateTime?> pinnedAt = const Value.absent(),
+                Value<DateTime?> archivedAt = const Value.absent(),
+                Value<DateTime?> mutedUntil = const Value.absent(),
+                Value<DateTime?> hiddenAt = const Value.absent(),
+                Value<String?> historyClearedMessageId = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ConversationsCompanion.insert(
                 id: id,
@@ -3357,6 +3735,11 @@ class $$ConversationsTableTableManager
                 createdAt: createdAt,
                 unreadCount: unreadCount,
                 left: left,
+                pinnedAt: pinnedAt,
+                archivedAt: archivedAt,
+                mutedUntil: mutedUntil,
+                hiddenAt: hiddenAt,
+                historyClearedMessageId: historyClearedMessageId,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

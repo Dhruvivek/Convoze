@@ -1,6 +1,6 @@
 import { isUuid } from '../auth/tokens.js';
 import { hydrateUsers } from './hydrator.js';
-import { messagePayload } from './messagePayload.js';
+import { messagePayload, tombstone } from './messagePayload.js';
 
 export const DEFAULT_HISTORY_LIMIT = 30;
 export const MAX_HISTORY_LIMIT = 100;
@@ -29,6 +29,9 @@ export async function listMessages(prisma, userId, conversationId, { before, lim
       conversationId,
       ...(before ? { id: { lt: before } } : {}),
       ...(participant.leftAt ? { createdAt: { lte: participant.leftAt } } : {}),
+      // Cleared (#45): everything at or before this caller's watermark is
+      // gone from their own history, permanently (survives a resync).
+      ...(participant.historyClearedMessageId ? { id: { gt: participant.historyClearedMessageId } } : {}),
     },
     orderBy: { id: 'desc' },
     take,
@@ -48,8 +51,13 @@ export async function listMessages(prisma, userId, conversationId, { before, lim
     for (const reaction of message.reactions) referencedUserIds.add(reaction.userId);
     if (message.replyToMessageId) {
       const target = replyById.get(message.replyToMessageId);
-      payload.replyPreview = target ? messagePayload(target) : null;
-      if (target && !target.isDeleted) referencedUserIds.add(target.senderId);
+      // A reply target this caller cleared for themselves (#45) hydrates as
+      // deleted for them only — other Participants still see the real reply
+      // preview through their own page of this same history.
+      const targetCleared =
+        target && participant.historyClearedMessageId && target.id <= participant.historyClearedMessageId;
+      payload.replyPreview = !target ? null : targetCleared ? tombstone(target) : messagePayload(target);
+      if (target && !target.isDeleted && !targetCleared) referencedUserIds.add(target.senderId);
     }
     return payload;
   });

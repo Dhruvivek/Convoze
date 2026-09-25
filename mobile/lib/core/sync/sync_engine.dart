@@ -115,6 +115,8 @@ class SyncEngine {
         await _applyReceipts(payload);
       case 'conversation.joined':
         await _applyConversationJoined(payload, myUserId: myUserId);
+      case 'conversation.prefs':
+        await applyConversationPrefs(db, payload);
       default:
         // Forward-compatible: `conversation.left`/`members`/`prefs` are
         // later specs' job (ADR 0008's own hydrator doesn't emit them yet
