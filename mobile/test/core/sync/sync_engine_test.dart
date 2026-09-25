@@ -6,40 +6,8 @@ import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:socket_io_client/socket_io_client.dart' as io;
-import 'package:socket_io_client/src/manager.dart';
 
-/// A socket double for the Outbox drainer: [emitWithAckAsync] returns
-/// [response] instead of touching the network, mirroring what
-/// `message:send`'s ack contract returns (`sendMessage.js`).
-class _FakeAckSocket extends io.Socket {
-  _FakeAckSocket(this.response)
-    : super(Manager(uri: 'http://fake', options: {'autoConnect': false}), '/', const {});
-
-  final Map<String, dynamic> response;
-  final sentEvents = <String>[];
-
-  @override
-  Future emitWithAckAsync(String event, dynamic data, {Function? ack, bool binary = false}) async {
-    sentEvents.add(event);
-    return response;
-  }
-}
-
-/// A socket double whose ack always fails, simulating a timed-out or
-/// dropped send (`drainOutbox`/`flushPendingReads` must stop, not spin).
-class _TimingOutSocket extends io.Socket {
-  _TimingOutSocket()
-    : super(Manager(uri: 'http://fake', options: {'autoConnect': false}), '/', const {});
-
-  final sentEvents = <String>[];
-
-  @override
-  Future emitWithAckAsync(String event, dynamic data, {Function? ack, bool binary = false}) async {
-    sentEvents.add(event);
-    throw StateError('ack timed out');
-  }
-}
+import '../../support/fake_ack_socket.dart';
 
 const me = 'user-me';
 const other = 'user-other';
@@ -344,7 +312,7 @@ void main() {
             createdAt: DateTime.now(),
           ),
         );
-    final socket = _FakeAckSocket({'ok': true, 'messageId': 'msg-1'});
+    final socket = FakeAckSocket({'ok': true, 'messageId': 'msg-1'});
 
     await engine.drainOutbox(socket);
 
@@ -363,7 +331,7 @@ void main() {
             createdAt: DateTime.now(),
           ),
         );
-    final socket = _FakeAckSocket({'ok': false, 'code': 'NOT_PARTICIPANT'});
+    final socket = FakeAckSocket({'ok': false, 'code': 'NOT_PARTICIPANT'});
 
     await engine.drainOutbox(socket);
 
@@ -377,7 +345,7 @@ void main() {
         .insert(
           PendingReadsCompanion.insert(conversationId: 'conv-1', messageId: 'msg-1'),
         );
-    final socket = _FakeAckSocket({'ok': true});
+    final socket = FakeAckSocket({'ok': true});
 
     await engine.flushPendingReads(socket);
 
@@ -391,7 +359,7 @@ void main() {
         .insert(
           PendingReadsCompanion.insert(conversationId: 'conv-1', messageId: 'msg-1'),
         );
-    final socket = _FakeAckSocket({'ok': false, 'code': 'NOT_FOUND'});
+    final socket = FakeAckSocket({'ok': false, 'code': 'NOT_FOUND'});
 
     await engine.flushPendingReads(socket);
 
@@ -404,7 +372,7 @@ void main() {
         .insert(
           PendingReadsCompanion.insert(conversationId: 'conv-1', messageId: 'msg-1'),
         );
-    final socket = _TimingOutSocket();
+    final socket = TimingOutSocket();
 
     await engine.flushPendingReads(socket);
 

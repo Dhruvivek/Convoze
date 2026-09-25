@@ -151,6 +151,20 @@ void main() {
       },
       reason: 'Bob\'s read watermark to reach Alice\'s replica',
     );
+    // ...and once the app re-renders with it, the tick itself is coloured.
+    final scheme = Theme.of(
+      tester.element(find.byType(ChatThreadScreen)),
+    ).colorScheme;
+    await pumpUntil(
+      tester,
+      () async => find
+          .byWidgetPredicate(
+            (w) => w is Icon && w.icon == Icons.done_all && w.color == scheme.tertiary,
+          )
+          .evaluate()
+          .isNotEmpty,
+      reason: 'the read tick to render in the tertiary colour',
+    );
 
     // A message sent from Alice's own second Device appears here too.
     await aliceDevice2.sendMessage(

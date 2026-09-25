@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
@@ -89,10 +90,15 @@ class MessagesRepository {
 
   /// Queues [text] in the Outbox (ADR 0009) and, if connected, kicks the
   /// drainer right away rather than waiting for the next reconnect.
+  /// [linkPreview] is the `{url, title, description}` shape `drainOutbox`
+  /// already knows how to send (`sendMessage.js` validates it server-side;
+  /// nothing on this branch builds one yet, but the Outbox column and wire
+  /// shape have carried it since #51).
   Future<void> send(
     String conversationId,
     String text, {
     String? replyToMessageId,
+    Map<String, dynamic>? linkPreview,
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
@@ -104,6 +110,9 @@ class MessagesRepository {
             conversationId: conversationId,
             content: trimmed,
             replyToMessageId: Value(replyToMessageId),
+            linkPreview: Value(
+              linkPreview == null ? null : jsonEncode(linkPreview),
+            ),
             createdAt: DateTime.now().toUtc(),
           ),
         );

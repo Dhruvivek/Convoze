@@ -10,8 +10,8 @@ import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:socket_io_client/socket_io_client.dart' as io;
-import 'package:socket_io_client/src/manager.dart';
+
+import '../../../support/fake_ack_socket.dart';
 
 /// Answers `GET /conversations/:id/messages` with a canned page, recording
 /// the query parameters it was called with.
@@ -41,20 +41,6 @@ class _FakeHistoryBackend implements HttpClientAdapter {
 
   @override
   void close({bool force = false}) {}
-}
-
-class _FakeAckSocket extends io.Socket {
-  _FakeAckSocket(this.response)
-    : super(Manager(uri: 'http://fake', options: {'autoConnect': false}), '/', const {});
-
-  final Map<String, dynamic> response;
-  final sentEvents = <String>[];
-
-  @override
-  Future emitWithAckAsync(String event, dynamic data, {Function? ack, bool binary = false}) async {
-    sentEvents.add(event);
-    return response;
-  }
 }
 
 const me = 'user-me';
@@ -127,8 +113,24 @@ void main() {
       expect(await db.select(db.outbox).get(), isEmpty);
     });
 
+    test('carries replyToMessageId and linkPreview through to the Outbox row', () async {
+      await repo.send(
+        'conv-1',
+        'check this out',
+        replyToMessageId: 'm-quoted',
+        linkPreview: {'url': 'https://example.com', 'title': 'Example'},
+      );
+
+      final row = await db.select(db.outbox).getSingle();
+      expect(row.replyToMessageId, 'm-quoted');
+      expect(
+        jsonDecode(row.linkPreview!),
+        {'url': 'https://example.com', 'title': 'Example'},
+      );
+    });
+
     test('kicks an immediate drain when a socket is live', () async {
-      final socket = _FakeAckSocket({'ok': true, 'messageId': 'm1'});
+      final socket = FakeAckSocket({'ok': true, 'messageId': 'm1'});
       final onlineRepo = MessagesRepository(
         db: db,
         dio: dio,
@@ -218,7 +220,7 @@ void main() {
       await db.into(db.participants).insert(
         ParticipantsCompanion.insert(conversationId: 'conv-1', userId: me),
       );
-      final socket = _FakeAckSocket({'ok': true});
+      final socket = FakeAckSocket({'ok': true});
       final onlineRepo = MessagesRepository(
         db: db,
         dio: dio,
