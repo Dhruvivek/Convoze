@@ -36,11 +36,15 @@ export function createPresenceService({ prisma, registry, clock }) {
       };
     },
 
-    // Persists `lastSeenAt = now` for `userId` — called once their last live
+    // Persists `lastSeenAt` for `userId` — called once their last live
     // socket disconnects (never while they still have one, since "online"
-    // itself is never stored).
-    markOffline(userId) {
-      return prisma.user.update({ where: { id: userId }, data: { lastSeenAt: clock.now() } });
+    // itself is never stored). Answers the moment it wrote, so a caller that
+    // also emits `userOffline { userId, lastSeenAt }` broadcasts the exact
+    // same instant rather than a second, later `clock.now()`.
+    async markOffline(userId) {
+      const at = clock.now();
+      await prisma.user.update({ where: { id: userId }, data: { lastSeenAt: at } });
+      return at;
     },
 
     // Graceful shutdown (#34): every currently online User's `lastSeenAt` is

@@ -180,7 +180,7 @@ export function createRealtime({
       const { userWentOffline } = registry.unregister(socket.id);
       if (userWentOffline) {
         presence.markOffline(userId).then(
-          () => io.to(conversationRoomNames).emit('userOffline', { userId, lastSeenAt: clock.now() }),
+          (lastSeenAt) => io.to(conversationRoomNames).emit('userOffline', { userId, lastSeenAt }),
           (err) => console.error(err),
         );
       }

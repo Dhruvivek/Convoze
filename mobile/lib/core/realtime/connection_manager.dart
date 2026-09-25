@@ -75,7 +75,11 @@ class ConnectionManager with WidgetsBindingObserver {
 
   /// Lets the sync engine (#51) attach its `sync:*` handlers to a new socket
   /// instance, the same way `sessionRevoked` is wired below — called once
-  /// per [connect], before the socket connects.
+  /// per [connect], before the socket connects. A constructor callback,
+  /// wired from `connectionManagerProvider` itself (core-to-core, since
+  /// `SyncEngine` lives in `lib/core/sync/`) — unlike [socketCreated] below,
+  /// which a `lib/features/` repository subscribes to from its own provider,
+  /// since core can't import a feature to call it the same way.
   final void Function(io.Socket socket) _onSocketCreated;
 
   /// Tells the app the Session is gone, once its tokens are already cleared

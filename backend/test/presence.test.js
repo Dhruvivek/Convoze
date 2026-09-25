@@ -94,14 +94,16 @@ describe('presence: userOnline / userOffline', () => {
     const offline = nextEvent(bob.socket, 'userOffline');
     alice.socket.disconnect();
 
-    assert.deepEqual(await offline, {
+    const payload = await offline;
+    assert.deepEqual(payload, {
       userId: alice.userId,
       lastSeenAt: server.clock.now().toISOString(),
     });
-    await waitFor(async () => {
-      const user = await prisma.user.findUnique({ where: { id: alice.userId } });
-      return user.lastSeenAt?.getTime() === server.clock.now().getTime();
-    });
+    // The broadcast and the persisted row must be the *same* instant, not
+    // two independent `clock.now()` reads that could drift apart under a
+    // real (non-frozen) clock.
+    const user = await prisma.user.findUnique({ where: { id: alice.userId } });
+    assert.equal(user.lastSeenAt.toISOString(), payload.lastSeenAt);
   });
 
   it('a bystander with no shared Conversation never sees userOnline', async () => {

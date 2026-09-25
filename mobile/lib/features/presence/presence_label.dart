@@ -40,9 +40,9 @@ const _months = [
 
 String _dateLabel(DateTime day) => '${_months[day.month - 1]} ${day.day}';
 
+// 24-hour, matching the spec's own example ("last seen today at 14:05").
 String _timeOfDay(DateTime local) {
-  final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+  final hour = local.hour.toString().padLeft(2, '0');
   final minute = local.minute.toString().padLeft(2, '0');
-  final period = local.hour < 12 ? 'AM' : 'PM';
-  return '$hour12:$minute $period';
+  return '$hour:$minute';
 }

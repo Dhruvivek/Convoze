@@ -13,9 +13,9 @@ void main() {
     expect(presenceLabel(const PresenceUnknown(), now: now), '');
   });
 
-  test('today shows the time', () {
+  test('today shows the time, 24-hour', () {
     final time = DateTime.utc(2026, 1, 5, 14, 5);
-    expect(presenceLabel(PresenceLastSeen(time), now: now), 'last seen today at 2:05 PM');
+    expect(presenceLabel(PresenceLastSeen(time), now: now), 'last seen today at 14:05');
   });
 
   test('yesterday, regardless of time of day', () {
