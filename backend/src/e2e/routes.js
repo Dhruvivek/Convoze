@@ -139,5 +139,14 @@ export function createE2eRouter({
     res.json(req.auth);
   });
 
+  // Deletes every UserUpdate row for the User, simulating the retention job
+  // (#50) having pruned the whole log (#51): their next connect finds a gap
+  // between their stored `since` and the (now nonexistent) oldest retained
+  // row, so `resolveStartSeq` sends them down the `sync:reset` path.
+  router.post('/users/:userId/expire-updates', async (req, res) => {
+    await prisma.userUpdate.deleteMany({ where: { userId: req.params.userId } });
+    res.status(204).end();
+  });
+
   return router;
 }

@@ -128,6 +128,41 @@ describe('POST /__e2e__/faults', () => {
   });
 });
 
+describe('POST /__e2e__/users/:userId/expire-updates', () => {
+  it("deletes the User's Update log", async () => {
+    const { app } = buildTestApp({ prisma, e2eMode: true });
+    const user = await prisma.user.create({
+      data: { phoneNumber: '+14155550100', phoneVerifiedAt: new Date() },
+    });
+    await prisma.userUpdate.create({
+      data: { userId: user.id, seq: 1, kind: 'message.new' },
+    });
+    await prisma.userUpdate.create({
+      data: { userId: user.id, seq: 2, kind: 'message.new' },
+    });
+
+    const res = await request(app).post(`/__e2e__/users/${user.id}/expire-updates`);
+
+    assert.equal(res.status, 204);
+    assert.equal(await prisma.userUpdate.count({ where: { userId: user.id } }), 0);
+  });
+
+  it("leaves other Users' Update logs alone", async () => {
+    const { app } = buildTestApp({ prisma, e2eMode: true });
+    const user = await prisma.user.create({
+      data: { phoneNumber: '+14155550100', phoneVerifiedAt: new Date() },
+    });
+    const other = await prisma.user.create({
+      data: { phoneNumber: '+14155550101', phoneVerifiedAt: new Date() },
+    });
+    await prisma.userUpdate.create({ data: { userId: other.id, seq: 1, kind: 'message.new' } });
+
+    await request(app).post(`/__e2e__/users/${user.id}/expire-updates`);
+
+    assert.equal(await prisma.userUpdate.count({ where: { userId: other.id } }), 1);
+  });
+});
+
 describe('fake Verify client', () => {
   it('approves only the fixed code', async () => {
     const { verifyClient } = buildTestApp({ prisma, e2eMode: true });
