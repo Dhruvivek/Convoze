@@ -1,5 +1,13 @@
 import { Server } from 'socket.io';
 
+import { createMessageDeleter } from '../messaging/deleteMessage.js';
+import { createMessageEditor } from '../messaging/editMessage.js';
+import { createReadMarker } from '../messaging/markRead.js';
+import { createPump } from '../messaging/pump.js';
+import { createSendRateLimit } from '../messaging/rateLimiter.js';
+import { createReactionToggler } from '../messaging/reactionToggle.js';
+import { createMessageSender } from '../messaging/sendMessage.js';
+import { resolveStartSeq } from '../messaging/syncState.js';
 import { createConnectionRegistry } from './registry.js';
 
 export const userRoom = (userId) => `user:${userId}`;
@@ -8,7 +16,7 @@ export const conversationRoom = (conversationId) => `conversation:${conversation
 // The Socket.IO server, not yet attached to an HTTP server. Every socket is
 // authenticated at its handshake and joined to its rooms by the server;
 // clients can't join or leave rooms themselves (ADR 0005).
-export function createRealtime({ prisma, authenticate, sessionRevoked }) {
+export function createRealtime({ prisma, authenticate, clock, sessionRevoked, pumpOptions = {} }) {
   // The only client is the app, so no HTTP long-polling fallback.
   const io = new Server({ transports: ['websocket'] });
   const registry = createConnectionRegistry();
@@ -26,6 +34,33 @@ export function createRealtime({ prisma, authenticate, sessionRevoked }) {
       socket.disconnect(true);
     }
   });
+  const rateLimiter = createSendRateLimit({ clock });
+  const pumpsByUser = new Map(); // userId -> Set<pump>, every live pump of theirs
+
+  function addPump(userId, pump) {
+    let pumps = pumpsByUser.get(userId);
+    if (!pumps) pumpsByUser.set(userId, (pumps = new Set()));
+    pumps.add(pump);
+  }
+
+  function removePump(userId, pump) {
+    const pumps = pumpsByUser.get(userId);
+    if (!pumps) return;
+    pumps.delete(pump);
+    if (pumps.size === 0) pumpsByUser.delete(userId);
+  }
+
+  // The Update writer's `onWake` hook (ADR 0008): every one of this User's
+  // connected pumps notices a new Update immediately, across all Devices.
+  function wakeUser(userId) {
+    for (const pump of pumpsByUser.get(userId) ?? []) pump.wake();
+  }
+
+  const sendMessage = createMessageSender({ prisma, rateLimiter, onWake: wakeUser });
+  const editMessage = createMessageEditor({ prisma, rateLimiter, onWake: wakeUser });
+  const deleteMessage = createMessageDeleter({ prisma, onWake: wakeUser });
+  const toggleReaction = createReactionToggler({ prisma, rateLimiter, onWake: wakeUser });
+  const markRead = createReadMarker({ prisma, onWake: wakeUser });
 
   // Rejecting here refuses the connection outright, as a `connect_error`,
   // rather than accepting it and booting it afterwards. The token is read
@@ -55,21 +90,65 @@ export function createRealtime({ prisma, authenticate, sessionRevoked }) {
       where: { userId: auth.userId },
       select: { conversationId: true },
     });
+    const { startSeq, resetSeq } = await resolveStartSeq(
+      prisma,
+      auth.userId,
+      socket.handshake.auth?.since,
+    );
     socket.data = {
       ...auth,
       rooms: [
         userRoom(auth.userId),
         ...participants.map(({ conversationId }) => conversationRoom(conversationId)),
       ],
+      startSeq,
+      resetSeq,
     };
     return undefined;
   }
 
   io.on('connection', (socket) => {
-    const { userId, sessionId, rooms } = socket.data;
+    const { userId, sessionId, rooms, startSeq, resetSeq } = socket.data;
     registry.register(socket.id, { userId, sessionId });
     socket.join(rooms);
-    socket.on('disconnect', () => registry.unregister(socket.id));
+    // The handshake extension (#48/ADR 0008): a Device too far behind (or
+    // connecting for the first time) is told to rebuild from a snapshot and
+    // resume from here, instead of the pump trying to resend a gap it can't.
+    if (resetSeq !== null) socket.emit('sync:reset', { currentSeq: resetSeq });
+
+    const pump = createPump({ prisma, socket, userId, startSeq, onWake: wakeUser, ...pumpOptions });
+    addPump(userId, pump);
+    pump.wake();
+
+    function handle(action) {
+      return async (payload, callback) => {
+        try {
+          const result = await action(userId, payload);
+          callback?.(result);
+        } catch (err) {
+          // Never ack an unexpected failure (a DB hiccup, say) as `INVALID`:
+          // that code means "bad request" and isn't retryable, but a
+          // transient fault is. Leaving it unacked lets the client's own
+          // ack-timeout-driven retry run instead, which every one of these
+          // actions is built to accept safely (clientMsgId, edits setting a
+          // value, deletes flagging, reactions keyed by their unique
+          // constraint).
+          console.error(err);
+        }
+      };
+    }
+
+    socket.on('message:send', handle(sendMessage));
+    socket.on('message:edit', handle(editMessage));
+    socket.on('message:delete', handle(deleteMessage));
+    socket.on('reaction:toggle', handle(toggleReaction));
+    socket.on('conversation:read', handle(markRead));
+
+    socket.on('disconnect', () => {
+      pump.stop();
+      removePump(userId, pump);
+      registry.unregister(socket.id);
+    });
   });
 
   // Moves an already-connected user's live sockets, across every Device, into

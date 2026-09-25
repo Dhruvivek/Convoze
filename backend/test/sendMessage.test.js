@@ -282,8 +282,13 @@ describe('message:send', () => {
       assert.equal(res.ok, true);
     }
 
-    await waitFor(() => bob.batches.flatMap((b) => b.updates).length >= 3, 8000);
-    const contents = bob.batches.flatMap((b) => b.updates).map((u) => u.payload.content);
+    // Acking each batch also moves Bob's delivery watermark (#49), which
+    // interleaves conversation.receipts Updates among these message.new
+    // ones — order among the message.new Updates is what's under test here.
+    const messageNewUpdates = () =>
+      bob.batches.flatMap((b) => b.updates).filter((u) => u.kind === 'message.new');
+    await waitFor(() => messageNewUpdates().length >= 3, 8000);
+    const contents = messageNewUpdates().map((u) => u.payload.content);
     assert.deepEqual(contents, ['a1', 'b1', 'a2']);
   });
 });
