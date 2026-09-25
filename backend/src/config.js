@@ -1,0 +1,28 @@
+// Reads and validates configuration from environment variables. Throws on
+// anything that must stop the server from starting.
+export function loadConfig(env) {
+  const e2eMode = env.E2E_MODE === 'true';
+
+  if (e2eMode && (env.NODE_ENV === 'production' || env.RENDER === 'true')) {
+    throw new Error(
+      'E2E_MODE must never be enabled in production: it mounts test-only endpoints and a fake OTP verifier.',
+    );
+  }
+
+  if (!env.DATABASE_URL) {
+    throw new Error('DATABASE_URL is required');
+  }
+
+  const jwtSecret = env.JWT_SECRET ?? (e2eMode ? 'e2e-only-jwt-secret' : undefined);
+  if (!jwtSecret) {
+    throw new Error('JWT_SECRET is required');
+  }
+
+  return {
+    port: Number(env.PORT ?? 3000),
+    databaseUrl: env.DATABASE_URL,
+    jwtSecret,
+    e2eMode,
+    e2eOtpCode: env.E2E_OTP_CODE ?? '000000',
+  };
+}
