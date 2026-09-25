@@ -36,8 +36,11 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   /// call it again.
   String? _readThrough;
 
-  /// Read once in [initState], not via `ref.read` in [dispose] — a widget's
-  /// `ref` is unsafe to use once it's being unmounted.
+  /// Read once in [initState], not via `ref.read` in [dispose]: by the time
+  /// `dispose()` runs, this widget is already unmounted (`State.mounted` is
+  /// false), and Riverpod's `ref` refuses to resolve a provider against an
+  /// unmounted widget's `BuildContext` — it throws rather than risk stale
+  /// state.
   late final TypingRepository _typingRepository;
 
   static const _loadOlderThreshold = 200.0;

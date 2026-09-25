@@ -222,4 +222,70 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'outgoing typing is throttled to at most one per ~3s',
+    (tester) async {
+      final bob = await OtherDevice.signIn(_bob);
+      others.add(bob);
+      await launchApp(tester);
+      await signIn(tester);
+      await untilStatus(tester, ConnectionStatus.connected);
+      final myUserId = await currentUserId();
+      final conversationId = await _directConversationWith(tester, bob, myUserId);
+      final bobSocket = await bob.connectSocket();
+      await openChat(tester, conversationId);
+
+      var typingCount = 0;
+      bobSocket.on('typing', (_) => typingCount++);
+
+      // Three keystrokes in quick succession, all well inside the 3s
+      // throttle window.
+      await tester.enterText(find.byKey(ChatThreadScreen.composerFieldKey), 'h');
+      await tester.pump();
+      await tester.enterText(find.byKey(ChatThreadScreen.composerFieldKey), 'he');
+      await tester.pump();
+      await tester.enterText(
+        find.byKey(ChatThreadScreen.composerFieldKey),
+        'hel',
+      );
+      await tester.pump();
+
+      // Time for the one allowed `typing` to actually arrive, well short of
+      // the 3s throttle window the next one would need to wait out.
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      expect(typingCount, 1);
+    },
+  );
+
+  testWidgets(
+    'stopTyping is sent on its own after ~5s idle, without sending',
+    (tester) async {
+      final bob = await OtherDevice.signIn(_bob);
+      others.add(bob);
+      await launchApp(tester);
+      await signIn(tester);
+      await untilStatus(tester, ConnectionStatus.connected);
+      final myUserId = await currentUserId();
+      final conversationId = await _directConversationWith(tester, bob, myUserId);
+      final bobSocket = await bob.connectSocket();
+      await openChat(tester, conversationId);
+
+      final bobSawStopTyping = nextEvent(
+        bobSocket,
+        'stopTyping',
+        timeout: const Duration(seconds: 10),
+      );
+      await tester.enterText(
+        find.byKey(ChatThreadScreen.composerFieldKey),
+        'h',
+      );
+      await tester.pump();
+
+      expect(
+        await bobSawStopTyping,
+        {'conversationId': conversationId, 'userId': myUserId},
+      );
+    },
+  );
 }

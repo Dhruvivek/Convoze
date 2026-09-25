@@ -112,18 +112,23 @@ class TypingRepository {
 
   // --- Receiving -------------------------------------------------------------
 
-  Future<void> _handleTyping(dynamic data) async {
-    final payload = (data as Map).cast<String, dynamic>();
-    final userId = payload['userId'] as String;
-    if (userId == await _myUserId()) return;
-    _addTyper(payload['conversationId'] as String, userId);
-  }
+  Future<void> _handleTyping(dynamic data) =>
+      _handleRemoteEvent(data, _addTyper);
 
-  Future<void> _handleStopTyping(dynamic data) async {
+  Future<void> _handleStopTyping(dynamic data) =>
+      _handleRemoteEvent(data, _removeTyper);
+
+  /// Shared shape of `typing`/`stopTyping`: decode `{conversationId, userId}`,
+  /// drop it if it's our own userId (a second Device of ours), otherwise
+  /// [apply] it.
+  Future<void> _handleRemoteEvent(
+    dynamic data,
+    void Function(String conversationId, String userId) apply,
+  ) async {
     final payload = (data as Map).cast<String, dynamic>();
     final userId = payload['userId'] as String;
     if (userId == await _myUserId()) return;
-    _removeTyper(payload['conversationId'] as String, userId);
+    apply(payload['conversationId'] as String, userId);
   }
 
   void _handleUserOffline(dynamic data) {
