@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:convoze/core/network/session_refresher.dart';
 import 'package:convoze/core/realtime/connection_manager.dart';
 import 'package:convoze/core/storage/token_store.dart';
@@ -60,6 +62,8 @@ void main() {
   late TokenStore tokenStore;
   late int sessionEndedCalls;
   late ConnectionManager manager;
+  late int? syncCursor;
+  late List<io.Socket> attachedSockets;
 
   setUp(() async {
     FlutterSecureStorage.setMockInitialValues({
@@ -69,6 +73,8 @@ void main() {
     sockets = [];
     backend = FakeBackend();
     sessionEndedCalls = 0;
+    syncCursor = null;
+    attachedSockets = [];
     tokenStore = TokenStore(const FlutterSecureStorage());
     manager = ConnectionManager(
       createSocket: () {
@@ -85,6 +91,8 @@ void main() {
         onSessionEnded: () => sessionEndedCalls++,
       ),
       onSessionEnded: () => sessionEndedCalls++,
+      readSyncCursor: () async => syncCursor,
+      onSocketCreated: attachedSockets.add,
     );
   });
 
@@ -369,6 +377,42 @@ void main() {
       expect(socket.connectCalls, 1);
       expect(manager.status, ConnectionStatus.offline);
       expect(sessionEndedCalls, 1);
+    });
+  });
+
+  group('sync engine seams (#51)', () {
+    test('the stored cursor is sent as `since` in the handshake', () async {
+      syncCursor = 42;
+      await manager.connect();
+
+      final completer = Completer<Map<String, dynamic>>();
+      (sockets.single.auth as Function)(completer.complete);
+      final captured = await completer.future;
+
+      expect(captured['since'], 42);
+    });
+
+    test('a null cursor sends no `since`', () async {
+      syncCursor = null;
+      await manager.connect();
+
+      final completer = Completer<Map<String, dynamic>>();
+      (sockets.single.auth as Function)(completer.complete);
+      final captured = await completer.future;
+
+      expect(captured['since'], isNull);
+    });
+
+    test('onSocketCreated fires once per new socket, before it connects', () async {
+      await manager.connect();
+      expect(attachedSockets, [sockets.single]);
+      expect(sockets.single.connectCalls, 1);
+
+      manager.disconnect();
+      await manager.connect();
+
+      expect(attachedSockets, sockets);
+      expect(attachedSockets, hasLength(2));
     });
   });
 }

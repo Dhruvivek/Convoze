@@ -109,6 +109,22 @@ class OtherDevice {
     return connected.future.timeout(const Duration(seconds: 5));
   }
 
+  /// Sends a Message on [socket] (from [connectSocket]) via `message:send`,
+  /// waiting for its ack, and answers the server's response
+  /// (`sendMessage.js`'s `{ok, messageId, createdAt}` / `{ok: false, code}`).
+  Future<Map<String, dynamic>> sendMessage(
+    io.Socket socket, {
+    required String conversationId,
+    String content = 'hi',
+  }) async {
+    final res = await socket.timeout(5000).emitWithAckAsync('message:send', {
+      'clientMsgId': const Uuid().v4(),
+      'conversationId': conversationId,
+      'content': content,
+    });
+    return (res as Map).cast<String, dynamic>();
+  }
+
   /// Closes every connection this Device opened.
   void dispose() {
     for (final socket in _sockets) {

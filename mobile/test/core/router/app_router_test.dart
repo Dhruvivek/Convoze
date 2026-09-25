@@ -1,7 +1,11 @@
 import 'package:convoze/app.dart';
+import 'package:convoze/core/db/database.dart';
+import 'package:convoze/core/db/database_provider.dart';
 import 'package:convoze/core/realtime/socket_factory.dart';
 import 'package:convoze/core/router/splash_screen.dart';
 import 'package:convoze/core/storage/token_store.dart';
+import 'package:drift/native.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -17,6 +21,9 @@ Future<GatedTokenStore> _launch(WidgetTester tester) async {
       overrides: [
         tokenStoreProvider.overrideWithValue(tokenStore),
         socketFactoryProvider.overrideWithValue(fakeSocketFactory()),
+        // In memory: a widget test signing in triggers a real connect(),
+        // which attaches the sync engine (#51) — never touch real disk here.
+        appDatabaseProvider.overrideWithValue(AppDatabase(NativeDatabase.memory())),
       ],
       child: const ConvozeApp(),
     ),
@@ -26,7 +33,7 @@ Future<GatedTokenStore> _launch(WidgetTester tester) async {
 }
 
 final _login = find.text('Sign in');
-final _conversations = find.text('Conversations');
+final _home = find.descendant(of: find.byType(AppBar), matching: find.text('Convoze'));
 final _splash = find.byType(SplashScreen);
 
 void main() {
@@ -45,7 +52,7 @@ void main() {
 
     expect(_splash, findsOneWidget);
     expect(_login, findsNothing);
-    expect(_conversations, findsNothing);
+    expect(_home, findsNothing);
   });
 
   testWidgets('goes from splash straight to conversations when signed in', (
@@ -56,7 +63,7 @@ void main() {
     tokenStore.refreshTokenRead.complete('session.secret');
     await tester.pumpAndSettle();
 
-    expect(_conversations, findsOneWidget);
+    expect(_home, findsOneWidget);
     expect(_splash, findsNothing);
     expect(_login, findsNothing);
   });

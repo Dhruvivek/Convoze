@@ -122,6 +122,12 @@ class E2eBackend {
   Future<void> dropTransport(String sessionId) =>
       _post('/__e2e__/sessions/$sessionId/drop-transport');
 
+  /// Deletes every UserUpdate row for [userId], simulating the retention job
+  /// (#50) having pruned the whole log (#51): their next connect finds a gap
+  /// and is sent down the `sync:reset` path.
+  Future<void> expireUpdateLog(String userId) =>
+      _post('/__e2e__/users/$userId/expire-updates');
+
   Future<void> _post(String path, {Object? data}) =>
       _call<void>(path, () => _dio.post<void>(path, data: data));
 

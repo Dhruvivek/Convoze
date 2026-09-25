@@ -9,6 +9,7 @@ import { createFaultInjector } from './e2e/faults.js';
 import { createRefreshCounter } from './e2e/refreshCounter.js';
 import { createE2eRouter } from './e2e/routes.js';
 import { errorHandler, notFoundHandler } from './http/errors.js';
+import { createMessagingRouter } from './messaging/routes.js';
 import { createRealtime } from './realtime/server.js';
 
 // Builds the server from its dependencies, so tests and production wire
@@ -69,6 +70,16 @@ export function createApp({
       tokenTtls,
       sessionRevoked,
       authenticated,
+    }),
+  );
+
+  app.use(
+    '/conversations',
+    createMessagingRouter({
+      prisma,
+      authenticated,
+      wakeUser: realtime.wakeUser,
+      joinUserToConversation: realtime.joinUserToConversation,
     }),
   );
 

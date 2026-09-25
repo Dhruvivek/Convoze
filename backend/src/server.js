@@ -2,6 +2,7 @@ import { createApp } from './app.js';
 import { systemClock } from './clock.js';
 import { loadConfig } from './config.js';
 import { createPrismaClient } from './db.js';
+import { startRetentionJob } from './messaging/retention.js';
 import { createFakeVerifyClient } from './verify/fakeVerifyClient.js';
 import { createTwilioVerifyClient } from './verify/twilioVerifyClient.js';
 
@@ -26,12 +27,15 @@ const { httpServer, realtime } = createApp({
   e2eMode: config.e2eMode,
 });
 
+const retentionJob = startRetentionJob({ prisma, clock: systemClock });
+
 httpServer.listen(config.port, () => {
   const mode = config.e2eMode ? ' in E2E MODE (test-only endpoints, fake OTP verifier)' : '';
   console.log(`Convoze backend listening on port ${config.port}${mode}`);
 });
 
 async function shutdown() {
+  retentionJob.stop();
   // Closes the sockets and the HTTP server under them.
   realtime.io.close();
   await prisma.$disconnect();

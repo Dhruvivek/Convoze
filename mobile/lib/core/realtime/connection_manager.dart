@@ -9,6 +9,7 @@ import '../network/dio_provider.dart';
 import '../network/session_refresher.dart';
 import '../storage/jwt.dart';
 import '../storage/token_store.dart';
+import '../sync/sync_engine.dart';
 import 'socket_factory.dart';
 
 part 'connection_manager.g.dart';
@@ -40,6 +41,8 @@ class ConnectionManager with WidgetsBindingObserver {
     required this._tokenStore,
     required this._sessionRefresher,
     required this._onSessionEnded,
+    required this._readSyncCursor,
+    required this._onSocketCreated,
   }) {
     WidgetsBinding.instance.addObserver(this);
   }
@@ -47,6 +50,16 @@ class ConnectionManager with WidgetsBindingObserver {
   final SocketFactory _createSocket;
   final TokenStore _tokenStore;
   final SessionRefresher _sessionRefresher;
+
+  /// The sync engine's stored cursor (#51 / ADR 0008), read fresh for every
+  /// (re)connect attempt — including automatic ones — the same way the
+  /// token already is, so `since` is never stale.
+  final Future<int?> Function() _readSyncCursor;
+
+  /// Lets the sync engine (#51) attach its `sync:*` handlers to a new socket
+  /// instance, the same way `sessionRevoked` is wired below — called once
+  /// per [connect], before the socket connects.
+  final void Function(io.Socket socket) _onSocketCreated;
 
   /// Tells the app the Session is gone, once its tokens are already cleared
   /// (#20's `AuthState.sessionEnded`), so the router sends it to login.
@@ -113,6 +126,7 @@ class ConnectionManager with WidgetsBindingObserver {
     final socket = _createSocket()
       ..auth = (callback) => unawaited(_authenticate(generation, callback));
     _socket = socket;
+    _onSocketCreated(socket);
     void onChange(ConnectionStatus Function() next) {
       if (identical(_socket, socket)) _setStatus(next());
     }
@@ -156,7 +170,10 @@ class ConnectionManager with WidgetsBindingObserver {
   Future<void> _authenticate(int generation, dynamic callback) async {
     await _ensureFreshToken();
     if (generation != _generation) return;
-    callback({'token': await _tokenStore.readAccessToken()});
+    callback({
+      'token': await _tokenStore.readAccessToken(),
+      'since': await _readSyncCursor(),
+    });
   }
 
   /// A handshake rejected because the token had already expired: refresh
@@ -267,6 +284,10 @@ ConnectionManager connectionManager(Ref ref) {
     sessionRefresher: ref.watch(sessionRefresherProvider),
     // Read when it happens, not now: auth state itself depends on Dio.
     onSessionEnded: () => ref.read(authStateProvider.notifier).sessionEnded(),
+    // Both read lazily (#51's sync engine also depends on Dio, transitively
+    // on this provider's own dependents), same trick as onSessionEnded above.
+    readSyncCursor: () => ref.read(syncEngineProvider).readCursor(),
+    onSocketCreated: (socket) => ref.read(syncEngineProvider).attach(socket),
   );
   ref.onDispose(manager.dispose);
   ref.listen(authStateProvider, (_, auth) {

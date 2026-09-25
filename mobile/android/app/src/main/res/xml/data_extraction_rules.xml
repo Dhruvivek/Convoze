@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ (API 31+) backup/transfer rules — same exclusion as
+  backup_rules.xml, in the newer format Android 12 requires alongside it.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="app_flutter/" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="app_flutter/" />
+    </device-transfer>
+</data-extraction-rules>

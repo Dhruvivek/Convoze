@@ -16,12 +16,13 @@ export function createUser(prisma, overrides = {}) {
   });
 }
 
-export function createConversation(prisma, { type = 'group', participantIds, name } = {}) {
+export function createConversation(prisma, { type = 'group', participantIds, name, createdById } = {}) {
   return prisma.conversation.create({
     data: {
       type,
       name,
       directKey: type === 'direct' ? [...participantIds].sort().join(':') : null,
+      createdById,
       participants: { create: participantIds.map((userId) => ({ userId })) },
     },
   });

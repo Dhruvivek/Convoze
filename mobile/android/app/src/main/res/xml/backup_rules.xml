@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Pre-Android 12 (API < 31) Auto Backup rules.
+
+  The local replica (ADR 0009) is fully rebuildable from the server, so it's
+  excluded from backup — a restored install resyncs from a REST snapshot
+  instead of restoring a stale copy. path_provider's
+  getApplicationSupportDirectory() resolves to <filesDir>/app_flutter on
+  Android, which is where drift_flutter stores the sqlite file (plus its
+  -wal/-shm journal siblings).
+-->
+<full-backup-content>
+    <exclude domain="file" path="app_flutter/" />
+</full-backup-content>

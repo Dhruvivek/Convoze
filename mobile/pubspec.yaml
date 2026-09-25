@@ -41,6 +41,12 @@ dependencies:
   flutter_secure_storage: ^11.2.0
   uuid: ^4.6.0
   socket_io_client: ^3.1.6
+  drift: ^2.35.0
+  sqlite3_flutter_libs: ^0.6.0+eol
+  path_provider: ^2.1.6
+  drift_flutter: ^0.3.1
+  path: ^1.9.1
+  flutter_cache_manager: ^3.4.5
 
 dev_dependencies:
   flutter_test:
@@ -56,6 +62,7 @@ dev_dependencies:
   build_runner: ^2.16.1
   integration_test:
     sdk: flutter
+  drift_dev: ^2.35.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

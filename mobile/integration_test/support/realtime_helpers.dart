@@ -1,4 +1,8 @@
+import 'dart:convert';
+
 import 'package:convoze/app.dart';
+import 'package:convoze/core/db/database.dart';
+import 'package:convoze/core/db/database_provider.dart';
 import 'package:convoze/core/realtime/connection_manager.dart';
 import 'package:convoze/features/auth/presentation/otp_entry_screen.dart';
 import 'package:convoze/features/auth/presentation/phone_entry_screen.dart';
@@ -59,3 +63,15 @@ Future<void> untilStatus(
 Future<String> currentSessionId() async => sessionIdOf(
   (await const FlutterSecureStorage().read(key: 'access_token'))!,
 );
+
+/// The id of the currently signed-in User.
+Future<String> currentUserId() async {
+  final json = (await const FlutterSecureStorage().read(key: 'user'))!;
+  return (jsonDecode(json) as Map<String, dynamic>)['id'] as String;
+}
+
+/// The app's local replica (#51), reached through its live provider tree —
+/// so a test can assert directly against what the sync engine has applied.
+AppDatabase replica(WidgetTester tester) =>
+    ProviderScope.containerOf(tester.element(find.byType(ConvozeApp)))
+        .read(appDatabaseProvider);
