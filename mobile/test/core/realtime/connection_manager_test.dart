@@ -54,6 +54,40 @@ Future<void> _flush() async {
   await Future<void>.delayed(Duration.zero);
 }
 
+/// Builds a [ConnectionManager] wired to this suite's fakes. Factored out so
+/// a test can build its own instance with a different [backgroundGrace] than
+/// the shared `setUp` one — needed to make "drained before the cap" and "the
+/// cap elapsed" observably different in timing (#54).
+ConnectionManager _buildManager({
+  required Duration backgroundGrace,
+  required List<_TestSocket> sockets,
+  required TokenStore tokenStore,
+  required FakeBackend backend,
+  required void Function() onSessionEnded,
+  required Future<int?> Function() readSyncCursor,
+  required void Function(io.Socket) onSocketCreated,
+  required Future<bool> Function() isOutboxEmpty,
+}) => ConnectionManager(
+  createSocket: () {
+    final socket = _TestSocket(
+      Manager(uri: 'http://fake', options: {'autoConnect': false}),
+    );
+    sockets.add(socket);
+    return socket;
+  },
+  tokenStore: tokenStore,
+  sessionRefresher: SessionRefresher(
+    refreshDio: Dio()..httpClientAdapter = backend,
+    tokenStore: tokenStore,
+    onSessionEnded: onSessionEnded,
+  ),
+  onSessionEnded: onSessionEnded,
+  readSyncCursor: readSyncCursor,
+  onSocketCreated: onSocketCreated,
+  isOutboxEmpty: isOutboxEmpty,
+  backgroundGrace: backgroundGrace,
+);
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -78,26 +112,16 @@ void main() {
     attachedSockets = [];
     outboxEmpty = true;
     tokenStore = TokenStore(const FlutterSecureStorage());
-    manager = ConnectionManager(
-      createSocket: () {
-        final socket = _TestSocket(
-          Manager(uri: 'http://fake', options: {'autoConnect': false}),
-        );
-        sockets.add(socket);
-        return socket;
-      },
+    manager = _buildManager(
+      // Fast in tests; #54's own group below exercises the cap itself.
+      backgroundGrace: const Duration(milliseconds: 50),
+      sockets: sockets,
       tokenStore: tokenStore,
-      sessionRefresher: SessionRefresher(
-        refreshDio: Dio()..httpClientAdapter = backend,
-        tokenStore: tokenStore,
-        onSessionEnded: () => sessionEndedCalls++,
-      ),
+      backend: backend,
       onSessionEnded: () => sessionEndedCalls++,
       readSyncCursor: () async => syncCursor,
       onSocketCreated: attachedSockets.add,
       isOutboxEmpty: () async => outboxEmpty,
-      // Fast in tests; #54's own group below exercises the cap itself.
-      backgroundGrace: const Duration(milliseconds: 50),
     );
   });
 
@@ -245,22 +269,39 @@ void main() {
 
   group('background grace (#54)', () {
     test('a non-empty Outbox holds the disconnect open until it drains', () async {
-      manager.setAuthenticated(true);
+      // A cap (5s) generous enough that disconnecting well before it (once
+      // the Outbox empties, within one ~200ms poll) is only explainable by
+      // the early-drain path — not distinguishable from "the cap elapsed"
+      // with this suite's other, much shorter `backgroundGrace`.
+      final graceManager = _buildManager(
+        backgroundGrace: const Duration(seconds: 5),
+        sockets: sockets,
+        tokenStore: tokenStore,
+        backend: backend,
+        onSessionEnded: () => sessionEndedCalls++,
+        readSyncCursor: () async => syncCursor,
+        onSocketCreated: attachedSockets.add,
+        isOutboxEmpty: () async => outboxEmpty,
+      );
+      addTearDown(graceManager.dispose);
+
+      graceManager.setAuthenticated(true);
       outboxEmpty = false;
 
-      manager.didChangeAppLifecycleState(AppLifecycleState.paused);
+      graceManager.didChangeAppLifecycleState(AppLifecycleState.paused);
       await pumpEventQueue();
       expect(
-        manager.status,
+        graceManager.status,
         isNot(ConnectionStatus.offline),
         reason: 'still draining, must not have disconnected yet',
       );
 
       outboxEmpty = true;
-      // One poll interval (200ms) for the grace loop to notice.
+      // One poll interval (200ms) for the grace loop to notice — nowhere
+      // near the 5s cap, so this can only be the early-drain path.
       await Future<void>.delayed(const Duration(milliseconds: 300));
 
-      expect(manager.status, ConnectionStatus.offline);
+      expect(graceManager.status, ConnectionStatus.offline);
     });
 
     test('a permanently non-empty Outbox disconnects once the cap elapses', () async {

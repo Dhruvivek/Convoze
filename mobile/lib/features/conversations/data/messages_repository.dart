@@ -116,8 +116,7 @@ class MessagesRepository {
             createdAt: DateTime.now().toUtc(),
           ),
         );
-    final socket = currentSocket();
-    if (socket != null) unawaited(syncEngine.drainOutbox(socket));
+    _kickDrainIfConnected();
   }
 
   /// Puts a `failed` Outbox row ("failed — tap to retry or delete", ADR
@@ -127,6 +126,12 @@ class MessagesRepository {
   Future<void> retry(String clientMsgId) async {
     await (db.update(db.outbox)..where((t) => t.clientMsgId.equals(clientMsgId)))
         .write(const OutboxCompanion(status: Value('pending')));
+    _kickDrainIfConnected();
+  }
+
+  /// Kicks the drainer right away rather than waiting for the next
+  /// reconnect/catch-up, if there's a socket to kick it on.
+  void _kickDrainIfConnected() {
     final socket = currentSocket();
     if (socket != null) unawaited(syncEngine.drainOutbox(socket));
   }

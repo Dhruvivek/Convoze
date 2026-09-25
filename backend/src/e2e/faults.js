@@ -8,6 +8,17 @@ import { sendError } from '../http/errors.js';
 // reaching the real handler, acked with `{ ok: false, code }` the same way
 // a real guard rejection would be, so the Outbox drainer's retry/failed
 // logic can be exercised deterministically.
+// Decrements `map[key]`'s `remaining`, deleting it once exhausted, and
+// answers the fault (or undefined if none is pending) — the one piece the
+// HTTP and socket-event injectors below share.
+function consume(map, key) {
+  const fault = map.get(key);
+  if (!fault) return undefined;
+  fault.remaining -= 1;
+  if (fault.remaining === 0) map.delete(key);
+  return fault;
+}
+
 export function createFaultInjector() {
   const pending = new Map();
   const pendingEvents = new Map();
@@ -23,11 +34,7 @@ export function createFaultInjector() {
     // Consumes and returns the injected `code` for `event`, or null if none
     // is pending.
     consumeEvent(event) {
-      const fault = pendingEvents.get(event);
-      if (!fault) return null;
-      fault.remaining -= 1;
-      if (fault.remaining === 0) pendingEvents.delete(event);
-      return fault.code;
+      return consume(pendingEvents, event)?.code ?? null;
     },
     clear() {
       pending.clear();
@@ -35,13 +42,11 @@ export function createFaultInjector() {
     },
     middleware(req, res, next) {
       const k = key(req.method, req.path);
-      const fault = pending.get(k);
+      const fault = consume(pending, k);
       if (!fault) {
         next();
         return;
       }
-      fault.remaining -= 1;
-      if (fault.remaining === 0) pending.delete(k);
       sendError(res, fault.status, fault.code, `Injected failure for ${k}`);
     },
   };
