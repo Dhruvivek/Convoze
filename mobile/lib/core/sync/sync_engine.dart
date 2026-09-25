@@ -30,6 +30,7 @@ class SyncEngine {
 
   bool _resetting = false;
   bool _draining = false;
+  bool _flushingReads = false;
 
   /// The stored Sync cursor, sent as `since` in the handshake `auth`
   /// payload. Null sends no `since` (a fresh install, or right after a wipe).
@@ -42,8 +43,13 @@ class SyncEngine {
     socket
       ..on('sync:batch', (args) => unawaited(_handleBatch(args)))
       ..on('sync:reset', (data) => unawaited(_handleReset(data, socket)))
-      ..on('sync:caught-up', (_) => unawaited(drainOutbox(socket)))
-      ..onConnect((_) => unawaited(drainOutbox(socket)));
+      ..on('sync:caught-up', (_) => unawaited(_drainAndFlush(socket)))
+      ..onConnect((_) => unawaited(_drainAndFlush(socket)));
+  }
+
+  Future<void> _drainAndFlush(io.Socket socket) async {
+    unawaited(drainOutbox(socket));
+    unawaited(flushPendingReads(socket));
   }
 
   // --- sync:batch --------------------------------------------------------
@@ -275,6 +281,57 @@ class SyncEngine {
       }
     } finally {
       _draining = false;
+    }
+  }
+
+  // --- Pending reads flusher ---------------------------------------------
+
+  /// Sends every queued read-watermark move as `conversation:read` (#53,
+  /// ADR 0009: "flushed as `conversation:read` when connected and deleted on
+  /// ack"), whenever the socket (re)connects or catches up — the same shape
+  /// as [drainOutbox], one row at a time, stopping (rather than spinning) on
+  /// a timeout or dropped socket so the next connect resumes it.
+  Future<void> flushPendingReads(io.Socket socket) async {
+    if (_flushingReads) return;
+    _flushingReads = true;
+    try {
+      while (true) {
+        final next = await (db.select(
+          db.pendingReads,
+        )..limit(1)).getSingleOrNull();
+        if (next == null) return;
+
+        Map<String, dynamic>? response;
+        try {
+          response =
+              ((await socket.timeout(15000).emitWithAckAsync('conversation:read', {
+                        'conversationId': next.conversationId,
+                        'messageId': next.messageId,
+                      }))
+                      as Map)
+                  .cast<String, dynamic>();
+        } catch (_) {
+          return;
+        }
+
+        if (response['ok'] == true) {
+          await (db.delete(db.pendingReads)..where(
+                (t) => t.conversationId.equals(next.conversationId),
+              ))
+              .go();
+          continue;
+        }
+
+        // Not retryable in place (unlike the Outbox's `RATE_LIMITED`): an
+        // error here means the read itself was rejected (e.g. the Message
+        // no longer exists). Drop it rather than spin forever on it — a
+        // later read for the same Conversation will replace it anyway.
+        await (db.delete(
+          db.pendingReads,
+        )..where((t) => t.conversationId.equals(next.conversationId))).go();
+      }
+    } finally {
+      _flushingReads = false;
     }
   }
 }

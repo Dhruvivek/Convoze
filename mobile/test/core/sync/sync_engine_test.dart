@@ -26,6 +26,21 @@ class _FakeAckSocket extends io.Socket {
   }
 }
 
+/// A socket double whose ack always fails, simulating a timed-out or
+/// dropped send (`drainOutbox`/`flushPendingReads` must stop, not spin).
+class _TimingOutSocket extends io.Socket {
+  _TimingOutSocket()
+    : super(Manager(uri: 'http://fake', options: {'autoConnect': false}), '/', const {});
+
+  final sentEvents = <String>[];
+
+  @override
+  Future emitWithAckAsync(String event, dynamic data, {Function? ack, bool binary = false}) async {
+    sentEvents.add(event);
+    throw StateError('ack timed out');
+  }
+}
+
 const me = 'user-me';
 const other = 'user-other';
 
@@ -354,5 +369,46 @@ void main() {
 
     final row = await db.select(db.outbox).getSingle();
     expect(row.status, 'failed');
+  });
+
+  test('flushPendingReads sends a queued read and deletes it on ack', () async {
+    await db
+        .into(db.pendingReads)
+        .insert(
+          PendingReadsCompanion.insert(conversationId: 'conv-1', messageId: 'msg-1'),
+        );
+    final socket = _FakeAckSocket({'ok': true});
+
+    await engine.flushPendingReads(socket);
+
+    expect(socket.sentEvents, ['conversation:read']);
+    expect(await db.select(db.pendingReads).get(), isEmpty);
+  });
+
+  test('flushPendingReads drops a rejected read rather than retrying it in place', () async {
+    await db
+        .into(db.pendingReads)
+        .insert(
+          PendingReadsCompanion.insert(conversationId: 'conv-1', messageId: 'msg-1'),
+        );
+    final socket = _FakeAckSocket({'ok': false, 'code': 'NOT_FOUND'});
+
+    await engine.flushPendingReads(socket);
+
+    expect(await db.select(db.pendingReads).get(), isEmpty);
+  });
+
+  test('flushPendingReads stops (without deleting) on a timed-out ack', () async {
+    await db
+        .into(db.pendingReads)
+        .insert(
+          PendingReadsCompanion.insert(conversationId: 'conv-1', messageId: 'msg-1'),
+        );
+    final socket = _TimingOutSocket();
+
+    await engine.flushPendingReads(socket);
+
+    expect(socket.sentEvents, ['conversation:read']);
+    expect(await db.select(db.pendingReads).get(), hasLength(1));
   });
 }
