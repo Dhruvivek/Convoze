@@ -22,8 +22,8 @@ function buildStarter(overrides = {}) {
 
 describe('startDirectConversation', () => {
   it('creates a direct Conversation between the caller and the target', async () => {
-    const alice = await createUser(prisma);
-    const bob = await createUser(prisma);
+    const alice = await createUser(prisma, { displayName: 'Alice' });
+    const bob = await createUser(prisma, { displayName: 'Bob' });
     const start = buildStarter();
 
     const result = await start(alice.id, { userId: bob.id });
@@ -31,6 +31,14 @@ describe('startDirectConversation', () => {
     assert.equal(result.ok, true);
     assert.equal(result.created, true);
     assert.equal(result.conversation.type, 'direct');
+    assert.deepEqual(
+      result.participants.map((p) => p.userId).sort(),
+      [alice.id, bob.id].sort(),
+    );
+    assert.deepEqual(
+      result.users.map((u) => u.id).sort(),
+      [alice.id, bob.id].sort(),
+    );
     const participants = await prisma.participant.findMany({
       where: { conversationId: result.conversation.id },
     });
@@ -83,6 +91,12 @@ describe('startDirectConversation', () => {
     assert.equal(second.created, false);
     assert.equal(second.conversation.id, first.conversation.id);
     assert.equal(reverse.conversation.id, first.conversation.id);
+    // The "already exists" path still returns real participants, not
+    // fabricated from the request.
+    assert.deepEqual(
+      second.participants.map((p) => p.userId).sort(),
+      [alice.id, bob.id].sort(),
+    );
     const count = await prisma.conversation.count({ where: { type: 'direct' } });
     assert.equal(count, 1);
   });

@@ -113,6 +113,7 @@ describe('POST /conversations/direct', () => {
       res.body.participants.map((p) => p.userId).sort(),
       [alice.user.id, bob.user.id].sort(),
     );
+    assert.ok(res.body.users.some((u) => u.id === bob.user.id));
   });
 
   it('returns 200 with the existing Conversation on a repeat call', async () => {
