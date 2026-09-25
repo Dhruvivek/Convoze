@@ -37,18 +37,19 @@ enum MessageType {
 }
 
 model User {
-  id              String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  phoneNumber     String        @unique
-  phoneVerifiedAt DateTime      @db.Timestamptz(3)
-  displayName     String?
-  avatarUrl       String?
-  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
-  sessions        Session[]
-  participants    Participant[]
-  messages        Message[]
-  reactions       Reaction[]
-  userSeq         UserSeq?
-  userUpdates     UserUpdate[]
+  id                         String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  phoneNumber                String         @unique
+  phoneVerifiedAt            DateTime       @db.Timestamptz(3)
+  displayName                String?
+  avatarUrl                  String?
+  createdAt                  DateTime       @default(now()) @db.Timestamptz(3)
+  sessions                   Session[]
+  participants               Participant[]
+  messages                   Message[]
+  reactions                  Reaction[]
+  userSeq                    UserSeq?
+  userUpdates                UserUpdate[]
+  startedDirectConversations Conversation[] @relation("ConversationCreatedBy")
 }
 
 model Session {
@@ -83,6 +84,11 @@ model Conversation {
   // Direct only: the two participants' user ids, sorted and joined, so the
   // database refuses a second direct Conversation between them (ADR 0004).
   directKey    String?          @unique
+  // Who started it (#50): lets the conversation list omit an empty direct
+  // Conversation for the Participant who didn't create it. Null for group
+  // Conversations, which have no REST creation path yet.
+  createdById  String?          @db.Uuid
+  createdBy    User?            @relation("ConversationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt    DateTime         @default(now()) @db.Timestamptz(3)
   participants Participant[]
   messages     Message[]
@@ -110,6 +116,12 @@ model Participant {
   lastReadMessage        Message? @relation("ParticipantReadWatermark", fields: [lastReadMessageId], references: [id], onDelete: SetNull)
   lastDeliveredMessageId String?  @db.Uuid
   lastDeliveredMessage   Message? @relation("ParticipantDeliveredWatermark", fields: [lastDeliveredMessageId], references: [id], onDelete: SetNull)
+
+  // Set when this Participant leaves (#50 only reads it; no leave mutation
+  // exists yet). The Conversation list keeps their row (ADR 0009: "left"
+  // conversations stay, flagged), and message history stops at whatever was
+  // current when they left instead of the conversation's latest.
+  leftAt DateTime? @db.Timestamptz(3)
 
   @@unique([conversationId, userId])
   @@index([userId])

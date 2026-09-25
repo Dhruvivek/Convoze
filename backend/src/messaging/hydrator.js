@@ -1,40 +1,9 @@
+import { groupBy } from './groupBy.js';
 import { UPDATE_KINDS } from './kinds.js';
+import { messagePayload, tombstone } from './messagePayload.js';
+import { unreadCountFor } from './unreadCount.js';
 
-const USER_SELECT = { id: true, displayName: true, avatarUrl: true, phoneNumber: true };
-
-// A deleted Message never carries its content past this boundary, even if
-// the caller reused a stale row: a tombstone is always built from scratch.
-function tombstone(message) {
-  return { id: message.id, conversationId: message.conversationId, isDeleted: true };
-}
-
-function messagePayload(message) {
-  if (message.isDeleted) return tombstone(message);
-  return {
-    id: message.id,
-    conversationId: message.conversationId,
-    senderId: message.senderId,
-    clientMsgId: message.clientMsgId,
-    replyToMessageId: message.replyToMessageId,
-    linkPreview: message.linkPreview,
-    type: message.type,
-    content: message.content,
-    createdAt: message.createdAt,
-    editedAt: message.editedAt,
-    isDeleted: message.isDeleted,
-  };
-}
-
-function groupBy(items, keyFn) {
-  const map = new Map();
-  for (const item of items) {
-    const key = keyFn(item);
-    const list = map.get(key);
-    if (list) list.push(item);
-    else map.set(key, [item]);
-  }
-  return map;
-}
+export const USER_SELECT = { id: true, displayName: true, avatarUrl: true, phoneNumber: true };
 
 // Distinct values of `field` across `rows`, optionally narrowed to one
 // `kind` first; always present since a kind's own ref field is never null.
@@ -43,19 +12,11 @@ function idsOf(rows, field, kind) {
   return [...new Set(matching.map((r) => r[field]))];
 }
 
-// A Participant's unread count for `conversationId`: non-deleted Messages
-// from other Users, at or after their read watermark's Message (ADR 0004's
-// "seen by" comparison — UUIDv7 ids sort like their createdAt). None read
-// yet counts every such Message (ADR 0009).
-function unreadCount(prisma, conversationId, participant) {
-  return prisma.message.count({
-    where: {
-      conversationId,
-      isDeleted: false,
-      senderId: { not: participant.userId },
-      ...(participant.lastReadMessageId ? { id: { gt: participant.lastReadMessageId } } : {}),
-    },
-  });
+// The `users` side-list (ADR 0009) for a set of referenced user ids, shared
+// by the Update batches this file hydrates and the REST pages of #50.
+export async function hydrateUsers(prisma, userIds) {
+  if (userIds.length === 0) return [];
+  return prisma.user.findMany({ where: { id: { in: userIds } }, select: USER_SELECT });
 }
 
 // Turns a batch of UserUpdate rows into their payloads as of now (ADR
@@ -130,7 +91,7 @@ export async function hydrateUpdates(prisma, rows) {
             lastReadMessageId: p.lastReadMessageId,
             lastDeliveredMessageId: p.lastDeliveredMessageId,
           })),
-          unreadCount: caller ? await unreadCount(prisma, row.conversationId, caller) : 0,
+          unreadCount: caller ? await unreadCountFor(prisma, row.conversationId, caller) : 0,
         };
         for (const p of list) referencedUserIds.add(p.userId);
         break;
@@ -152,13 +113,7 @@ export async function hydrateUpdates(prisma, rows) {
     });
   }
 
-  const users =
-    referencedUserIds.size > 0
-      ? await prisma.user.findMany({
-          where: { id: { in: [...referencedUserIds] } },
-          select: USER_SELECT,
-        })
-      : [];
+  const users = await hydrateUsers(prisma, [...referencedUserIds]);
 
   return { updates, users };
 }

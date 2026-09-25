@@ -40,8 +40,11 @@ function fail(code) {
 // through — there's no REST send path, so there's only one set of guards to
 // keep in sync. `onWake(userId)` fires once per affected Participant
 // (sender included) after commit, which is what lets their connected pumps
-// (`pump.js`) notice immediately rather than polling for it.
-export function createMessageSender({ prisma, rateLimiter, onWake }) {
+// (`pump.js`) notice immediately rather than polling for it. `onMessageCommitted`
+// is the push seam (#50/ADR 0006): no-op by default, so this ticket sends no
+// pushes itself, but a later one can pass a real implementation without
+// touching this file again.
+export function createMessageSender({ prisma, rateLimiter, onWake, onMessageCommitted = () => {} }) {
   return async function sendMessage(userId, request) {
     const { clientMsgId, conversationId, content, replyToMessageId, linkPreview } = request ?? {};
 
@@ -127,6 +130,10 @@ export function createMessageSender({ prisma, rateLimiter, onWake }) {
     }
 
     for (const { userId: recipientId } of participants) onWake(recipientId);
+    const recipientUserIds = participants
+      .map(({ userId: participantId }) => participantId)
+      .filter((participantId) => participantId !== userId);
+    onMessageCommitted(message, recipientUserIds);
 
     return { ok: true, messageId: message.id, createdAt: message.createdAt };
   };

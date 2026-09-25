@@ -188,5 +188,9 @@ export function createRealtime({ prisma, authenticate, clock, sessionRevoked, pu
     joinUserToConversation,
     removeUserFromConversation,
     dropTransports,
+    // Lets REST handlers outside this module (the direct-conversation starter,
+    // #50) wake a User's connected pumps the same way every socket action
+    // already does.
+    wakeUser,
   };
 }
