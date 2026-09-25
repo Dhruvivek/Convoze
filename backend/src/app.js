@@ -23,6 +23,7 @@ export function createApp({
   jwtSecret,
   sessionRevoked = createSessionRevokedHook(),
   e2eMode = false,
+  pumpOptions,
 }) {
   const app = express();
   app.disable('x-powered-by');
@@ -30,7 +31,7 @@ export function createApp({
   const tokenTtls = createTokenTtls();
   const authenticate = createAuthenticator({ prisma, jwtSecret, clock });
   const authenticated = requireAuth(authenticate);
-  const realtime = createRealtime({ prisma, authenticate, sessionRevoked });
+  const realtime = createRealtime({ prisma, authenticate, clock, sessionRevoked, pumpOptions });
 
   if (e2eMode) {
     const faults = createFaultInjector();

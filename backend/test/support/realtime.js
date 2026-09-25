@@ -62,6 +62,18 @@ export function nextEvent(socket, event, ms = 500) {
 
 export const timedOut = Symbol('timedOut');
 
+// Auto-acks every `sync:batch` the pump sends `socket`, recording each
+// batch's payload — for tests that need the Update log to drain cleanly
+// without asserting on the ack itself.
+export function collectBatches(socket) {
+  const batches = [];
+  socket.on('sync:batch', (payload, ack) => {
+    batches.push(payload);
+    ack({});
+  });
+  return batches;
+}
+
 // Polls `condition` until it holds, failing after `ms`: for server-side
 // effects of a client's disconnect, which the client can't observe.
 export async function waitFor(condition, ms = 1000) {
