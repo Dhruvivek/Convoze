@@ -19,6 +19,8 @@ class ChatThreadScreen extends ConsumerStatefulWidget {
 
   static const composerFieldKey = Key('chat-composer-field');
   static const sendButtonKey = Key('chat-send-button');
+  static const retryFailedKey = Key('chat-retry-failed');
+  static const discardFailedKey = Key('chat-discard-failed');
 
   @override
   ConsumerState<ChatThreadScreen> createState() => _ChatThreadScreenState();
@@ -75,6 +77,44 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     await ref.read(messagesRepositoryProvider).send(widget.conversationId, text);
   }
 
+  /// "failed — tap to retry or delete" (ADR 0009): offers both, then acts on
+  /// the choice through [MessagesRepository].
+  Future<void> _handleFailedTap(String clientMsgId) async {
+    final repository = ref.read(messagesRepositoryProvider);
+    final choice = await showModalBottomSheet<_FailedMessageAction>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              key: ChatThreadScreen.retryFailedKey,
+              leading: const Icon(Icons.refresh),
+              title: const Text('Retry'),
+              onTap: () =>
+                  Navigator.pop(context, _FailedMessageAction.retry),
+            ),
+            ListTile(
+              key: ChatThreadScreen.discardFailedKey,
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Delete'),
+              onTap: () =>
+                  Navigator.pop(context, _FailedMessageAction.discard),
+            ),
+          ],
+        ),
+      ),
+    );
+    switch (choice) {
+      case _FailedMessageAction.retry:
+        await repository.retry(clientMsgId);
+      case _FailedMessageAction.discard:
+        await repository.discard(clientMsgId);
+      case null:
+        break;
+    }
+  }
+
   void _markReadIfNewer(List<ChatMessageView> views) {
     if (views.isEmpty) return;
     final newest = views.last.id;
@@ -120,6 +160,7 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                 scrollController: _scroll,
                 isLoadingOlder: threadState.isLoadingOlder,
                 reachedStart: threadState.reachedStart,
+                onTapFailed: (clientMsgId) => unawaited(_handleFailedTap(clientMsgId)),
               ),
               AsyncError() => const Center(
                 child: Text('Couldn\'t load this conversation'),
@@ -210,3 +251,5 @@ class _Composer extends StatelessWidget {
     );
   }
 }
+
+enum _FailedMessageAction { retry, discard }

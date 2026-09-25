@@ -27,6 +27,23 @@ class _FakeSocket extends io.Socket {
     return this;
   }
 
+  // No real backend is ever going to ack anything (#54): the base
+  // implementation would otherwise register a real 15s ack-timeout Timer
+  // that outlives the widget tree whenever a test's Outbox/pending-reads
+  // drainer fires on this "connected" socket, failing the test framework's
+  // no-pending-timers invariant. Failing fast instead mirrors what actually
+  // happens with no backend there, and the drainers already treat a failed
+  // ack as "stop, the next connect resumes it" rather than spinning.
+  @override
+  Future emitWithAckAsync(
+    String event,
+    dynamic data, {
+    Function? ack,
+    bool binary = false,
+  }) {
+    return Future.error(StateError('no backend to ack $event'));
+  }
+
   @override
   void dispose() {
     connected = false;

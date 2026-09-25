@@ -46,6 +46,19 @@ class E2eBackend {
     },
   );
 
+  /// Makes the next [count] calls to socket event [event] (`message:send`,
+  /// ...) fail with `{ ok: false, code }` (#54) — the socket-side twin of
+  /// [failNext], for exercising the Outbox drainer's retry/failed paths
+  /// deterministically.
+  Future<void> failNextSocketEvent(
+    String event, {
+    int count = 1,
+    required String code,
+  }) => _post(
+    '/__e2e__/socket-faults',
+    data: {'event': event, 'count': count, 'code': code},
+  );
+
   /// Requests a code for [phoneNumber] through the real API, as another
   /// Device would, to use up some of its rate limit.
   Future<void> requestOtp(String phoneNumber) =>

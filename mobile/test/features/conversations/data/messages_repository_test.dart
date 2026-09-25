@@ -147,6 +147,74 @@ void main() {
     });
   });
 
+  group('retry', () {
+    test('puts a failed row back to pending', () async {
+      await db.into(db.outbox).insert(
+        OutboxCompanion.insert(
+          clientMsgId: 'c1',
+          conversationId: 'conv-1',
+          content: 'hi',
+          status: const Value('failed'),
+          createdAt: DateTime.utc(2026, 1, 1),
+        ),
+      );
+
+      await repo.retry('c1');
+
+      final row = await db.select(db.outbox).getSingle();
+      expect(row.status, 'pending');
+    });
+
+    test('kicks an immediate drain when a socket is live', () async {
+      await db.into(db.outbox).insert(
+        OutboxCompanion.insert(
+          clientMsgId: 'c1',
+          conversationId: 'conv-1',
+          content: 'hi',
+          status: const Value('failed'),
+          createdAt: DateTime.utc(2026, 1, 1),
+        ),
+      );
+      final socket = FakeAckSocket({'ok': true, 'messageId': 'm1', 'createdAt': '2026-01-01T00:00:00.000Z'});
+      final onlineRepo = MessagesRepository(
+        db: db,
+        dio: dio,
+        tokenStore: TokenStore(const FlutterSecureStorage()),
+        syncEngine: engine,
+        currentSocket: () => socket,
+      );
+
+      await onlineRepo.retry('c1');
+      await pumpEventQueue();
+
+      expect(socket.sentEvents, ['message:send']);
+      expect(await db.select(db.outbox).get(), isEmpty);
+    });
+
+    test('is a no-op once the row is already gone', () async {
+      await repo.retry('does-not-exist');
+      expect(await db.select(db.outbox).get(), isEmpty);
+    });
+  });
+
+  group('discard', () {
+    test('deletes the Outbox row', () async {
+      await db.into(db.outbox).insert(
+        OutboxCompanion.insert(
+          clientMsgId: 'c1',
+          conversationId: 'conv-1',
+          content: 'hi',
+          status: const Value('failed'),
+          createdAt: DateTime.utc(2026, 1, 1),
+        ),
+      );
+
+      await repo.discard('c1');
+
+      expect(await db.select(db.outbox).get(), isEmpty);
+    });
+  });
+
   group('markRead', () {
     test('does nothing without any local messages', () async {
       await repo.markRead('conv-1');

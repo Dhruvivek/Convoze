@@ -139,6 +139,57 @@ class OtherDevice {
     return (res as Map).cast<String, dynamic>();
   }
 
+  /// `message:edit` on [socket] (#54): sender-only, text messages only.
+  Future<Map<String, dynamic>> editMessage(
+    io.Socket socket, {
+    required String messageId,
+    required String content,
+  }) async {
+    final res = await socket.timeout(5000).emitWithAckAsync('message:edit', {
+      'messageId': messageId,
+      'content': content,
+    });
+    return (res as Map).cast<String, dynamic>();
+  }
+
+  /// `message:delete` on [socket] (#54): sender-only soft delete.
+  Future<Map<String, dynamic>> deleteMessage(
+    io.Socket socket, {
+    required String messageId,
+  }) async {
+    final res = await socket
+        .timeout(5000)
+        .emitWithAckAsync('message:delete', {'messageId': messageId});
+    return (res as Map).cast<String, dynamic>();
+  }
+
+  /// `reaction:toggle` on [socket] (#54): adds if absent, removes if present.
+  Future<Map<String, dynamic>> toggleReaction(
+    io.Socket socket, {
+    required String messageId,
+    required String emoji,
+  }) async {
+    final res = await socket.timeout(5000).emitWithAckAsync('reaction:toggle', {
+      'messageId': messageId,
+      'emoji': emoji,
+    });
+    return (res as Map).cast<String, dynamic>();
+  }
+
+  /// `conversation:read` on [socket] (#54): moves this Device's read (and
+  /// delivery) watermark forward.
+  Future<Map<String, dynamic>> markRead(
+    io.Socket socket, {
+    required String conversationId,
+    required String messageId,
+  }) async {
+    final res = await socket.timeout(5000).emitWithAckAsync('conversation:read', {
+      'conversationId': conversationId,
+      'messageId': messageId,
+    });
+    return (res as Map).cast<String, dynamic>();
+  }
+
   /// Closes every connection this Device opened.
   void dispose() {
     for (final socket in _sockets) {
@@ -167,4 +218,27 @@ Future<dynamic> nextEvent(
   return received.future
       .timeout(timeout)
       .whenComplete(() => socket.off(event, handler));
+}
+
+/// Listens for every `sync:batch` on [socket] (from [OtherDevice.connectSocket]),
+/// calling [onBatch] with each decoded payload (#54). Acks with the batch's
+/// highest `seq` unless [ack] is false — for a test that needs to hold a
+/// batch open on purpose (a Device not acking a delivery, say) rather than
+/// the drainer's normal path.
+void listenForBatches(
+  io.Socket socket,
+  void Function(Map<String, dynamic> payload) onBatch, {
+  bool ack = true,
+}) {
+  socket.on('sync:batch', (args) {
+    final list = args as List;
+    final payload = (list[0] as Map).cast<String, dynamic>();
+    if (ack) {
+      final ackFn = list[1] as Function;
+      final updates = (payload['updates'] as List).cast<Map>();
+      final highestSeq = updates.map((u) => u['seq'] as int).reduce((a, b) => a > b ? a : b);
+      ackFn(highestSeq);
+    }
+    onBatch(payload);
+  });
 }
