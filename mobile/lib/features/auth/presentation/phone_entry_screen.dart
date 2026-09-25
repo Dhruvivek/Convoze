@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'auth_failure_message.dart';
 import 'auth_state.dart';
 
 class PhoneEntryScreen extends ConsumerStatefulWidget {
@@ -45,13 +46,8 @@ class _PhoneEntryScreenState extends ConsumerState<PhoneEntryScreen> {
     try {
       await ref.read(authStateProvider.notifier).requestOtp(phoneNumber);
       if (mounted) context.go('/login/otp', extra: phoneNumber);
-    } catch (_) {
-      if (mounted) {
-        setState(
-          () =>
-              _error = "Couldn't send a code. Check the number and try again.",
-        );
-      }
+    } catch (e) {
+      if (mounted) setState(() => _error = authFailureMessage(e));
     } finally {
       if (mounted) setState(() => _sending = false);
     }

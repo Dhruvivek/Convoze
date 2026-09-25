@@ -26,12 +26,29 @@ class E2eBackend {
   /// Empties every table and clears pending injected faults.
   Future<void> reset() => _post('/__e2e__/reset');
 
-  /// Makes the next [count] calls to `method path` fail with 503.
-  Future<void> failNext(String method, String path, {int count = 1}) =>
-      _post(
-        '/__e2e__/faults',
-        data: {'method': method, 'path': path, 'count': count},
-      );
+  /// Makes the next [count] calls to `method path` fail with [status] and
+  /// error [code] (503 `fault_injected` unless given).
+  Future<void> failNext(
+    String method,
+    String path, {
+    int count = 1,
+    int? status,
+    String? code,
+  }) => _post(
+    '/__e2e__/faults',
+    data: {
+      'method': method,
+      'path': path,
+      'count': count,
+      'status': ?status,
+      'code': ?code,
+    },
+  );
+
+  /// Requests a code for [phoneNumber] through the real API, as another
+  /// Device would, to use up some of its rate limit.
+  Future<void> requestOtp(String phoneNumber) =>
+      _post('/auth/otp/request', data: {'phoneNumber': phoneNumber});
 
   Future<void> _post(String path, {Object? data}) async {
     try {

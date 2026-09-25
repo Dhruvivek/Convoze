@@ -20,6 +20,25 @@ const PHONE = '+14155550100';
 const DEVICE_A = '0199a1b2-0000-4000-8000-00000000000a';
 const DEVICE_B = '0199a1b2-0000-4000-8000-00000000000b';
 
+// Every error response has exactly one shape: { error: { code, message } }.
+function assertError(res, status, code) {
+  assert.equal(res.status, status);
+  assert.deepEqual(Object.keys(res.body), ['error']);
+  assert.deepEqual(Object.keys(res.body.error).sort(), ['code', 'message']);
+  assert.equal(res.body.error.code, code);
+  assert.equal(typeof res.body.error.message, 'string');
+}
+
+function requestOtp(app, phoneNumber = PHONE) {
+  return request(app).post('/auth/otp/request').send({ phoneNumber });
+}
+
+function failSends(verifyClient) {
+  verifyClient.sendCode = async () => {
+    throw new Error('Twilio is down');
+  };
+}
+
 function verify(app, overrides = {}) {
   return request(app)
     .post('/auth/otp/verify')
@@ -73,9 +92,129 @@ describe('POST /auth/otp/request', () => {
 
     const res = await request(app).post('/auth/otp/request').send({ phoneNumber: '12345' });
 
-    assert.equal(res.status, 400);
-    assert.equal(res.body.error.code, 'invalid_request');
+    assertError(res, 400, 'invalid_phone_number');
     assert.equal(await prisma.otpRequest.count(), 0);
+  });
+
+  it('rejects a body without a phone number', async () => {
+    const { app } = buildTestApp({ prisma });
+
+    const res = await request(app).post('/auth/otp/request').send({});
+
+    assertError(res, 400, 'invalid_request');
+  });
+
+  it('answers 502 when the SMS provider fails, without recording the request', async () => {
+    const { app, verifyClient } = buildTestApp({ prisma });
+    failSends(verifyClient);
+
+    const res = await requestOtp(app);
+
+    assertError(res, 502, 'otp_provider_unavailable');
+    assert.equal(await prisma.otpRequest.count(), 0);
+  });
+});
+
+describe('OTP request rate limit', () => {
+  const MINUTE = 60 * 1000;
+
+  it('accepts three requests for a number within 15 minutes and rejects the fourth', async () => {
+    const { app, clock } = buildTestApp({ prisma });
+
+    for (let i = 0; i < 3; i++) {
+      assert.equal((await requestOtp(app)).status, 202);
+      clock.advance(4 * MINUTE);
+    }
+    const fourth = await requestOtp(app);
+
+    assertError(fourth, 429, 'otp_rate_limited');
+  });
+
+  it('does not record rejected requests', async () => {
+    const { app } = buildTestApp({ prisma });
+    for (let i = 0; i < 3; i++) await requestOtp(app);
+
+    await requestOtp(app);
+    await requestOtp(app);
+
+    assert.equal(await prisma.otpRequest.count(), 3);
+  });
+
+  it('does not text a code for a rejected request', async () => {
+    const { app, verifyClient } = buildTestApp({ prisma });
+    for (let i = 0; i < 3; i++) await requestOtp(app);
+    let sends = 0;
+    verifyClient.sendCode = async () => {
+      sends += 1;
+    };
+
+    await requestOtp(app);
+
+    assert.equal(sends, 0);
+  });
+
+  it('accepts requests again once the oldest one is 15 minutes old', async () => {
+    const { app, clock } = buildTestApp({ prisma });
+    await requestOtp(app);
+    clock.advance(1 * MINUTE);
+    await requestOtp(app);
+    await requestOtp(app);
+
+    clock.advance(14 * MINUTE - 1);
+    const justBefore = await requestOtp(app);
+    clock.advance(1);
+    const atWindowEnd = await requestOtp(app);
+    const next = await requestOtp(app);
+
+    assertError(justBefore, 429, 'otp_rate_limited');
+    assert.equal(atWindowEnd.status, 202);
+    // The window slides: the other two requests are still inside it.
+    assertError(next, 429, 'otp_rate_limited');
+  });
+
+  it('counts every spelling of one number against the same limit', async () => {
+    const { app } = buildTestApp({ prisma });
+
+    await requestOtp(app, '+1 (415) 555-0100');
+    await requestOtp(app, '+1 415-555-0100');
+    await requestOtp(app, '+14155550100');
+    const fourth = await requestOtp(app, '+1 415 555 0100');
+
+    assertError(fourth, 429, 'otp_rate_limited');
+  });
+
+  it('never lets concurrent requests past the limit', async () => {
+    const { app } = buildTestApp({ prisma });
+
+    const responses = await Promise.all(Array.from({ length: 8 }, () => requestOtp(app)));
+
+    const accepted = responses.filter((res) => res.status === 202).length;
+    assert.ok(accepted <= 3, `accepted ${accepted} concurrent requests`);
+    assert.equal(await prisma.otpRequest.count(), accepted);
+    for (const res of responses.filter((r) => r.status !== 202)) {
+      assertError(res, 429, 'otp_rate_limited');
+    }
+  });
+
+  it('limits each number separately', async () => {
+    const { app } = buildTestApp({ prisma });
+    for (let i = 0; i < 3; i++) await requestOtp(app);
+
+    const other = await requestOtp(app, '+14155550199');
+
+    assert.equal(other.status, 202);
+  });
+
+  it('does not count requests the SMS provider failed to send', async () => {
+    const { app, verifyClient } = buildTestApp({ prisma });
+    const sendCode = verifyClient.sendCode;
+    failSends(verifyClient);
+    for (let i = 0; i < 3; i++) await requestOtp(app);
+    verifyClient.sendCode = sendCode;
+
+    const res = await requestOtp(app);
+
+    assert.equal(res.status, 202);
   });
 });
 
@@ -179,8 +318,7 @@ describe('POST /auth/otp/verify', () => {
 
     const res = await verify(app, { code: '999999' });
 
-    assert.equal(res.status, 401);
-    assert.equal(res.body.error.code, 'invalid_code');
+    assertError(res, 401, 'invalid_otp');
     assert.equal(await prisma.user.count(), 0);
     assert.equal(await prisma.session.count(), 0);
   });
@@ -191,8 +329,50 @@ describe('POST /auth/otp/verify', () => {
     const noDevice = await verify(app, { deviceId: undefined });
     const badPlatform = await verify(app, { platform: 'windows' });
 
-    assert.equal(noDevice.status, 400);
-    assert.equal(badPlatform.status, 400);
-    assert.equal(badPlatform.body.error.code, 'invalid_request');
+    assertError(noDevice, 400, 'invalid_request');
+    assertError(badPlatform, 400, 'invalid_request');
+  });
+
+  it('rejects a request without a code or phone number', async () => {
+    const { app } = buildTestApp({ prisma });
+
+    const noCode = await verify(app, { code: undefined });
+    const noPhone = await verify(app, { phoneNumber: undefined });
+    const numericCode = await verify(app, { code: 123456 });
+
+    assertError(noCode, 400, 'invalid_request');
+    assertError(noPhone, 400, 'invalid_request');
+    assertError(numericCode, 400, 'invalid_request');
+  });
+
+  it('rejects malformed JSON', async () => {
+    const { app } = buildTestApp({ prisma });
+
+    const res = await request(app)
+      .post('/auth/otp/verify')
+      .set('Content-Type', 'application/json')
+      .send('{"phoneNumber":');
+
+    assertError(res, 400, 'invalid_request');
+  });
+
+  it('rejects a phone number that is not valid', async () => {
+    const { app } = buildTestApp({ prisma });
+
+    const res = await verify(app, { phoneNumber: '12345' });
+
+    assertError(res, 400, 'invalid_phone_number');
+  });
+
+  it('answers 502 when the SMS provider cannot check the code', async () => {
+    const { app, verifyClient } = buildTestApp({ prisma });
+    verifyClient.checkCode = async () => {
+      throw new Error('Twilio is down');
+    };
+
+    const res = await verify(app);
+
+    assertError(res, 502, 'otp_provider_unavailable');
+    assert.equal(await prisma.session.count(), 0);
   });
 });

@@ -45,7 +45,7 @@ npm run start:e2e
 This sets `E2E_MODE=true`, which:
 
 - replaces Twilio Verify with a fake that accepts only `E2E_OTP_CODE` (default `000000`);
-- mounts test-only endpoints: `POST /__e2e__/reset` empties the database, and `POST /__e2e__/faults` with `{ method, path, count }` makes the next `count` calls to that endpoint fail with 503.
+- mounts test-only endpoints: `POST /__e2e__/reset` empties the database, and `POST /__e2e__/faults` with `{ method, path, count, status?, code? }` makes the next `count` calls to that endpoint fail with that status and error code (503 `fault_injected` by default; e.g. 502 `otp_provider_unavailable` stands in for an SMS provider outage).
 
 The server refuses to start in e2e mode when `NODE_ENV=production`.
 

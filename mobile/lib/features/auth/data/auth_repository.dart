@@ -5,6 +5,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../core/models/user.dart';
 import '../../../core/network/dio_provider.dart';
 import '../../../core/storage/token_store.dart';
+import 'auth_failure.dart';
 
 part 'auth_repository.g.dart';
 
@@ -28,30 +29,36 @@ class AuthRepository {
   final TokenStore _tokenStore;
 
   /// Asks the backend to text a code to [phoneNumber] (with its +country code).
+  ///
+  /// Throws an [AuthFailure] when it can't.
   Future<void> requestOtp(String phoneNumber) async {
-    await _dio.post<void>(
-      '/auth/otp/request',
-      data: {'phoneNumber': phoneNumber},
-    );
+    await _post<void>('/auth/otp/request', {'phoneNumber': phoneNumber});
   }
 
   /// Exchanges the texted [code] for a Session on this Device.
+  ///
+  /// Throws an [AuthFailure] when it can't.
   Future<SignInResult> verifyOtp(String phoneNumber, String code) async {
-    final res = await _dio.post<Map<String, dynamic>>(
-      '/auth/otp/verify',
-      data: {
-        'phoneNumber': phoneNumber,
-        'code': code,
-        'deviceId': await _tokenStore.deviceId(),
-        'platform': _platform,
-      },
-    );
+    final res = await _post<Map<String, dynamic>>('/auth/otp/verify', {
+      'phoneNumber': phoneNumber,
+      'code': code,
+      'deviceId': await _tokenStore.deviceId(),
+      'platform': _platform,
+    });
     final body = res.data!;
     return SignInResult(
       accessToken: body['accessToken'] as String,
       refreshToken: body['refreshToken'] as String,
       user: User.fromJson(body['user'] as Map<String, dynamic>),
     );
+  }
+
+  Future<Response<T>> _post<T>(String path, Object data) async {
+    try {
+      return await _dio.post<T>(path, data: data);
+    } on DioException catch (e) {
+      throw AuthFailure.fromDioException(e);
+    }
   }
 
   static String get _platform =>

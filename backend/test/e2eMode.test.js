@@ -73,6 +73,23 @@ describe('POST /__e2e__/faults', () => {
     assert.equal(third.status, 200);
   });
 
+  it('fails with the given status and error code instead, when named', async () => {
+    const { app } = buildTestApp({ prisma, e2eMode: true });
+    await request(app).post('/__e2e__/faults').send({
+      method: 'POST',
+      path: '/auth/otp/request',
+      count: 1,
+      status: 502,
+      code: 'otp_provider_unavailable',
+    });
+
+    const res = await request(app).post('/auth/otp/request').send({ phoneNumber: '+14155550100' });
+
+    assert.equal(res.status, 502);
+    assert.equal(res.body.error.code, 'otp_provider_unavailable');
+    assert.equal(await prisma.otpRequest.count(), 0);
+  });
+
   it('only affects the named method and path', async () => {
     const { app } = buildTestApp({ prisma, e2eMode: true });
     await request(app).post('/__e2e__/faults').send({ method: 'POST', path: '/health', count: 1 });
@@ -97,9 +114,17 @@ describe('POST /__e2e__/faults', () => {
     const { app } = buildTestApp({ prisma, e2eMode: true });
 
     const res = await request(app).post('/__e2e__/faults').send({ path: '/health', count: 0 });
+    const badStatus = await request(app)
+      .post('/__e2e__/faults')
+      .send({ method: 'GET', path: '/health', count: 1, status: 200 });
+    const badCode = await request(app)
+      .post('/__e2e__/faults')
+      .send({ method: 'GET', path: '/health', count: 1, code: 42 });
 
     assert.equal(res.status, 400);
     assert.equal(res.body.error.code, 'invalid_request');
+    assert.equal(badStatus.status, 400);
+    assert.equal(badCode.status, 400);
   });
 });
 
