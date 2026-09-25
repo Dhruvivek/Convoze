@@ -29,6 +29,9 @@ class _FakeAuthRepository implements AuthRepository {
       user: User(id: 'u1', phoneNumber: phoneNumber, displayName: null),
     );
   }
+
+  @override
+  Future<void> logout() async {}
 }
 
 const _phoneNumber = '+14155550100';

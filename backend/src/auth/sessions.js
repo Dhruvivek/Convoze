@@ -60,7 +60,11 @@ export async function signIn(
 
 // Trades a refresh token for a new pair, rotating the secret on the same
 // Session row. Null when the token can't be refreshed.
-export async function refreshSession(prisma, refreshToken, { clock, jwtSecret, tokenTtls }) {
+export async function refreshSession(
+  prisma,
+  refreshToken,
+  { clock, jwtSecret, tokenTtls, sessionRevoked },
+) {
   const now = clock.now();
   const parsed = parseRefreshToken(refreshToken);
   if (!parsed) return null;
@@ -68,7 +72,7 @@ export async function refreshSession(prisma, refreshToken, { clock, jwtSecret, t
   const session = await prisma.session.findUnique({ where: { id: sessionId } });
   if (!session || session.revokedAt || session.expiresAt <= now) return null;
   if (session.refreshTokenHash !== hashRefreshSecret(secret)) {
-    await revokeForReuse(prisma, sessionId, now);
+    await revokeSession(prisma, session, now, sessionRevoked);
     return null;
   }
 
@@ -85,7 +89,7 @@ export async function refreshSession(prisma, refreshToken, { clock, jwtSecret, t
     },
   });
   if (count === 0) {
-    await revokeForReuse(prisma, sessionId, now);
+    await revokeSession(prisma, session, now, sessionRevoked);
     return null;
   }
 
@@ -95,11 +99,20 @@ export async function refreshSession(prisma, refreshToken, { clock, jwtSecret, t
   );
 }
 
-// A secret that isn't the Session's current one has already been rotated
-// away, so someone else may hold the Session: end it for everyone (ADR 0003).
-async function revokeForReuse(prisma, sessionId, now) {
-  await prisma.session.updateMany({
-    where: { id: sessionId, revokedAt: null },
+// Signs one Device out: ends the Session the caller is using, and no other.
+export async function logout(prisma, { sessionId, userId }, { clock, sessionRevoked }) {
+  await revokeSession(prisma, { id: sessionId, userId }, clock.now(), sessionRevoked);
+}
+
+// Every revocation goes through here, so the hook fires for each one: on
+// logout, and on reuse of a secret that isn't the Session's current one,
+// which has already been rotated away, so someone else may hold the Session
+// and it ends for everyone (ADR 0003). Conditional on the Session still being
+// open, so of several concurrent revocations only one fires the hook.
+async function revokeSession(prisma, { id, userId }, now, sessionRevoked) {
+  const { count } = await prisma.session.updateMany({
+    where: { id, revokedAt: null },
     data: { revokedAt: now },
   });
+  if (count > 0) sessionRevoked.fire({ sessionId: id, userId });
 }

@@ -1,4 +1,5 @@
 import { createApp } from '../../src/app.js';
+import { createSessionRevokedHook } from '../../src/auth/sessionRevoked.js';
 import { createPrismaClient } from '../../src/db.js';
 import { resetDatabase } from '../../src/e2e/resetDatabase.js';
 import { createFakeVerifyClient } from '../../src/verify/fakeVerifyClient.js';
@@ -21,14 +22,16 @@ export function createTestPrisma() {
 export function buildTestApp({ prisma, e2eMode = false } = {}) {
   const clock = createFakeClock();
   const verifyClient = createFakeVerifyClient({ code: TEST_OTP_CODE });
+  const sessionRevoked = createSessionRevokedHook();
   const app = createApp({
     prisma,
     verifyClient,
     clock,
     jwtSecret: TEST_JWT_SECRET,
+    sessionRevoked,
     e2eMode,
   });
-  return { app, clock, verifyClient };
+  return { app, clock, verifyClient, sessionRevoked };
 }
 
 export { resetDatabase };

@@ -53,7 +53,15 @@ class AuthRepository {
     );
   }
 
-  Future<Response<T>> _post<T>(String path, Object data) async {
+  /// Ends this Device's Session on the server, so its tokens stop working
+  /// at once.
+  ///
+  /// Throws an [AuthFailure] when it can't.
+  Future<void> logout() async {
+    await _post<void>('/auth/logout');
+  }
+
+  Future<Response<T>> _post<T>(String path, [Object? data]) async {
     try {
       return await _dio.post<T>(path, data: data);
     } on DioException catch (e) {

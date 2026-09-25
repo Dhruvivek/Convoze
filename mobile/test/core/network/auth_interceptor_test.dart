@@ -62,8 +62,12 @@ class FakeBackend implements HttpClientAdapter {
     await holdPath[options.path]?.future;
     final authorization = options.headers['Authorization'] as String?;
     authorizationsSeen.add(authorization);
+    // Of the /auth routes only logout is protected; the rest answer 401 to
+    // the credentials in their body, which the fake never accepts.
+    final unprotectedAuthRoute =
+        options.path.startsWith('/auth/') && options.path != '/auth/logout';
     if (rejectAllProtected ||
-        options.path.startsWith('/auth/') ||
+        unprotectedAuthRoute ||
         authorization != 'Bearer $accessToken') {
       return _json(401, {
         'error': {'code': 'unauthenticated', 'message': 'no'},
@@ -193,6 +197,18 @@ void main() {
     await expectLater(call, throwsA(isA<DioException>()));
     expect(backend.refreshCalls, 0);
   });
+
+  test(
+    'renews an expired access token for a logout, which needs one',
+    () async {
+      backend.expireAccessToken();
+
+      final res = await dio.post<Map<String, dynamic>>('/auth/logout');
+
+      expect(res.statusCode, 200);
+      expect(backend.refreshCalls, 1);
+    },
+  );
 
   test(
     'when the refresh is rejected, ends the Session but keeps the Device ID',

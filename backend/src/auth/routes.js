@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { sendError } from '../http/errors.js';
 import { releaseOtpRequest, reserveOtpRequest } from './otpRateLimit.js';
 import { normalisePhoneNumber } from './phoneNumber.js';
-import { refreshSession, signIn } from './sessions.js';
+import { logout, refreshSession, signIn } from './sessions.js';
 
 const PLATFORMS = new Set(['android', 'ios']);
 
@@ -17,10 +17,19 @@ function sendInvalidPhoneNumber(res) {
   sendError(res, 400, 'invalid_phone_number', 'Not a valid phone number in international format');
 }
 
-export function createAuthRouter({ prisma, verifyClient, clock, jwtSecret, tokenTtls }) {
+export function createAuthRouter({
+  prisma,
+  verifyClient,
+  clock,
+  jwtSecret,
+  tokenTtls,
+  sessionRevoked,
+  authenticated,
+}) {
   const router = Router();
-  // What issuing a token pair needs, on sign-in and on refresh alike.
-  const issuing = { clock, jwtSecret, tokenTtls };
+  // What issuing a token pair needs, on sign-in and on refresh alike, plus
+  // the hook a refresh fires when it detects reuse and revokes the Session.
+  const issuing = { clock, jwtSecret, tokenTtls, sessionRevoked };
 
   // Answers the same way whether or not the number belongs to a User, so it
   // can't be used to find out who is registered.
@@ -108,6 +117,11 @@ export function createAuthRouter({ prisma, verifyClient, clock, jwtSecret, token
       return;
     }
     res.json(pair);
+  });
+
+  router.post('/logout', authenticated, async (req, res) => {
+    await logout(prisma, req.auth, { clock, sessionRevoked });
+    res.status(204).end();
   });
 
   return router;

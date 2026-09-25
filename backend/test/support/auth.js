@@ -4,11 +4,11 @@ import request from 'supertest';
 import { TEST_OTP_CODE } from './testApp.js';
 
 // Signs one Device in through the real API and returns the verify response.
-export async function signIn(app) {
+export async function signIn(app, { deviceId = '0199a1b2-0000-4000-8000-00000000000a' } = {}) {
   const res = await request(app).post('/auth/otp/verify').send({
     phoneNumber: '+14155550100',
     code: TEST_OTP_CODE,
-    deviceId: '0199a1b2-0000-4000-8000-00000000000a',
+    deviceId,
     platform: 'android',
   });
   assert.equal(res.status, 200);
@@ -17,6 +17,11 @@ export async function signIn(app) {
 
 export function refresh(app, refreshToken) {
   return request(app).post('/auth/refresh').send({ refreshToken });
+}
+
+export function logout(app, authorization) {
+  const req = request(app).post('/auth/logout');
+  return authorization === undefined ? req : req.set('Authorization', authorization);
 }
 
 // The e2e echo endpoint sits behind the real auth middleware, so it stands in

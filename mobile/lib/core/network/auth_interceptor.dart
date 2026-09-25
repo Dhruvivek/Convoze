@@ -41,11 +41,9 @@ class AuthInterceptor extends Interceptor {
     ErrorInterceptorHandler handler,
   ) async {
     final options = err.requestOptions;
-    // A 401 from /auth/* is about the credentials sent to it (a wrong code,
-    // a dead refresh token), not about an expired access token.
     final renewable =
         err.response?.statusCode == 401 &&
-        !options.path.startsWith('/auth/') &&
+        !_isUnprotectedAuthRoute(options.path) &&
         options.extra[_retriedKey] != true;
     if (!renewable || !await _renewSince(options)) {
       handler.next(err);
@@ -58,6 +56,19 @@ class AuthInterceptor extends Interceptor {
       handler.next(e);
     }
   }
+
+  /// The routes that take no access token. A 401 from them is about the
+  /// credentials sent to them (a wrong code, a dead refresh token), not about
+  /// an expired access token. The other /auth routes (logout) are protected
+  /// like any other.
+  static const _unprotectedAuthRoutes = {
+    '/auth/otp/request',
+    '/auth/otp/verify',
+    '/auth/refresh',
+  };
+
+  static bool _isUnprotectedAuthRoute(String path) =>
+      _unprotectedAuthRoutes.contains(path);
 
   /// Makes sure the stored access token is newer than the one [options] was
   /// sent with, refreshing only if nobody else already has. True when there
@@ -98,7 +109,7 @@ class AuthInterceptor extends Interceptor {
   /// Forgets the Session (the Device ID stays: it names this install) and
   /// tells the app, which sends the user back to login.
   Future<void> _endSession() async {
-    await _tokenStore.clearTokens();
+    await _tokenStore.clearSession();
     _onSessionEnded();
   }
 }

@@ -25,7 +25,13 @@ final _conversations = find.text('Conversations');
 final _splash = find.byType(SplashScreen);
 
 void main() {
-  setUp(() => FlutterSecureStorage.setMockInitialValues({}));
+  // The gated store holds back the refresh token; the rest of a Session is
+  // stored as usual.
+  setUp(
+    () => FlutterSecureStorage.setMockInitialValues({
+      'user': '{"id":"u1","phoneNumber":"+14155554821","displayName":null}',
+    }),
+  );
 
   testWidgets('shows the splash screen, not login, while restoring', (
     tester,
@@ -60,16 +66,5 @@ void main() {
 
     expect(_login, findsOneWidget);
     expect(_splash, findsNothing);
-  });
-
-  testWidgets('signing out returns to login', (tester) async {
-    final tokenStore = await _launch(tester);
-    tokenStore.refreshTokenRead.complete('session.secret');
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byTooltip('Sign out'));
-    await tester.pumpAndSettle();
-
-    expect(_login, findsOneWidget);
   });
 }

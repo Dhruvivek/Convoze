@@ -2,6 +2,7 @@ import express from 'express';
 
 import { createAuthenticator, requireAuth } from './auth/authenticate.js';
 import { createAuthRouter } from './auth/routes.js';
+import { createSessionRevokedHook } from './auth/sessionRevoked.js';
 import { createTokenTtls } from './auth/tokenTtls.js';
 import { createFaultInjector } from './e2e/faults.js';
 import { createRefreshCounter } from './e2e/refreshCounter.js';
@@ -10,7 +11,15 @@ import { errorHandler, notFoundHandler } from './http/errors.js';
 
 // Builds the Express app from its dependencies, so tests and production wire
 // different implementations (fake Verify client, controllable clock, ...).
-export function createApp({ prisma, verifyClient, clock, jwtSecret, e2eMode = false }) {
+// Whoever needs to hear about revoked Sessions subscribes to `sessionRevoked`.
+export function createApp({
+  prisma,
+  verifyClient,
+  clock,
+  jwtSecret,
+  sessionRevoked = createSessionRevokedHook(),
+  e2eMode = false,
+}) {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json());
@@ -35,7 +44,18 @@ export function createApp({ prisma, verifyClient, clock, jwtSecret, e2eMode = fa
     res.json({ status: 'ok' });
   });
 
-  app.use('/auth', createAuthRouter({ prisma, verifyClient, clock, jwtSecret, tokenTtls }));
+  app.use(
+    '/auth',
+    createAuthRouter({
+      prisma,
+      verifyClient,
+      clock,
+      jwtSecret,
+      tokenTtls,
+      sessionRevoked,
+      authenticated,
+    }),
+  );
 
   app.use(notFoundHandler);
   app.use(errorHandler);

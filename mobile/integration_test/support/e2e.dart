@@ -51,6 +51,21 @@ class E2eBackend {
   Future<void> requestOtp(String phoneNumber) =>
       _post('/auth/otp/request', data: {'phoneNumber': phoneNumber});
 
+  /// Tries [refreshToken] against the real API, as a copy of it would be
+  /// used, and answers the status code: 200 while its Session is live.
+  Future<int> refreshStatus(String refreshToken) async {
+    const path = '/auth/refresh';
+    final res = await _call(
+      path,
+      () => _dio.post<void>(
+        path,
+        data: {'refreshToken': refreshToken},
+        options: Options(validateStatus: (_) => true),
+      ),
+    );
+    return res.statusCode!;
+  }
+
   /// Shortens token lifetimes for Sessions signed in or refreshed from now
   /// until the next [reset].
   Future<void> setTokenTtls({

@@ -1,5 +1,6 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../../../core/models/user.dart';
 import '../../../core/storage/token_store.dart';
 import '../data/auth_repository.dart';
 
@@ -22,7 +23,10 @@ class Unauthenticated extends AuthStatus {
 /// There is a Session on this Device. Its access token may have expired; the
 /// first 401 refreshes it.
 class Authenticated extends AuthStatus {
-  const Authenticated();
+  const Authenticated(this.user);
+
+  /// Who is signed in, as they were at sign-in.
+  final User user;
 }
 
 /// The one source of truth for whether the app is signed in; the router
@@ -35,17 +39,23 @@ class AuthState extends _$AuthState {
     return const Restoring();
   }
 
-  /// A stored refresh token means the Device is still signed in. Nothing is
-  /// checked over the network, so the app opens straight onto its screens.
+  /// A stored refresh token and User mean the Device is still signed in.
+  /// Nothing is checked over the network, so the app opens straight onto its
+  /// screens.
   Future<void> _restore() async {
     AuthStatus restored;
     try {
-      final refreshToken = await ref
-          .read(tokenStoreProvider)
-          .readRefreshToken();
-      restored = refreshToken == null
-          ? const Unauthenticated()
-          : const Authenticated();
+      final tokenStore = ref.read(tokenStoreProvider);
+      final refreshToken = await tokenStore.readRefreshToken();
+      final user = refreshToken == null ? null : await tokenStore.readUser();
+      if (user != null) {
+        restored = Authenticated(user);
+      } else {
+        // Tokens without their User are half a Session; don't leave them
+        // behind for the next sign-in to overwrite.
+        if (refreshToken != null) await tokenStore.clearSession();
+        restored = const Unauthenticated();
+      }
     } catch (_) {
       restored = const Unauthenticated();
     }
@@ -60,21 +70,36 @@ class AuthState extends _$AuthState {
     final result = await ref
         .read(authRepositoryProvider)
         .verifyOtp(phoneNumber, code);
-    await ref
-        .read(tokenStoreProvider)
-        .saveTokens(
-          accessToken: result.accessToken,
-          refreshToken: result.refreshToken,
-        );
-    state = const Authenticated();
+    final tokenStore = ref.read(tokenStoreProvider);
+    await tokenStore.saveTokens(
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+    );
+    await tokenStore.saveUser(result.user);
+    state = Authenticated(result.user);
   }
 
   /// The Session can no longer be renewed and its tokens are already gone:
   /// back to login.
   void sessionEnded() => state = const Unauthenticated();
 
-  Future<void> signOut() async {
-    await ref.read(tokenStoreProvider).clearTokens();
+  /// Logs this Device out: ends the Session on the server if it can, then
+  /// forgets it here and goes back to login whatever the server said, so
+  /// being offline never leaves the user stuck signed in.
+  ///
+  /// A second call while one is in flight waits on that one.
+  Future<void> signOut() =>
+      _signingOut ??= _signOut().whenComplete(() => _signingOut = null);
+
+  Future<void>? _signingOut;
+
+  Future<void> _signOut() async {
+    try {
+      await ref.read(authRepositoryProvider).logout();
+    } catch (_) {
+      // Best effort: the Session still ends on this Device.
+    }
+    await ref.read(tokenStoreProvider).clearSession();
     state = const Unauthenticated();
   }
 }

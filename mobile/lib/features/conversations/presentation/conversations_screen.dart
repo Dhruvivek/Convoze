@@ -1,23 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../auth/presentation/auth_state.dart';
+import '../../auth/presentation/account_menu.dart';
 
-class ConversationsScreen extends ConsumerWidget {
+class ConversationsScreen extends StatelessWidget {
   const ConversationsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Conversations'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Sign out',
-            onPressed: () => ref.read(authStateProvider.notifier).signOut(),
-          ),
-        ],
+        actions: const [AccountMenu()],
       ),
       body: const Center(child: Text('No conversations yet')),
     );
