@@ -8,25 +8,36 @@ import 'package:uuid/uuid.dart';
 
 import 'e2e.dart';
 
-/// Another User's Device, driven from the test through the real API and a
-/// real Socket.IO connection: how a test makes someone else sign in, come
-/// online and listen.
+/// A Device other than the app under test, driven from the test through the
+/// real API and a real Socket.IO connection: how a test makes someone else
+/// sign in, come online and listen, or signs the app's own User in on a
+/// second Device.
 class OtherDevice {
-  OtherDevice._({
+  OtherDevice._(
+    this._dio, {
     required this.userId,
     required this.sessionId,
     required this.accessToken,
+    required this.refreshToken,
   });
 
+  final Dio _dio;
   final String userId;
   final String sessionId;
   final String accessToken;
+  final String refreshToken;
   final List<io.Socket> _sockets = [];
 
   /// Signs [phoneNumber] in on a new Device.
   static Future<OtherDevice> signIn(String phoneNumber) async {
     final deviceId = const Uuid().v4();
-    final dio = Dio(BaseOptions(baseUrl: AppConfig.apiBaseUrl));
+    final dio = Dio(
+      BaseOptions(
+        baseUrl: AppConfig.apiBaseUrl,
+        // Tests assert on statuses, so none of them throws.
+        validateStatus: (_) => true,
+      ),
+    );
     final res = await dio.post<Map<String, dynamic>>(
       '/auth/otp/verify',
       data: {
@@ -36,14 +47,39 @@ class OtherDevice {
         'platform': 'android',
       },
     );
+    if (res.statusCode != 200) {
+      throw StateError('Signing $phoneNumber in failed: ${res.statusCode}');
+    }
     final body = res.data!;
     final accessToken = body['accessToken'] as String;
     return OtherDevice._(
+      dio,
       userId: (body['user'] as Map<String, dynamic>)['id'] as String,
       sessionId: sessionIdOf(accessToken),
       accessToken: accessToken,
+      refreshToken: body['refreshToken'] as String,
     );
   }
+
+  /// Logs out every other Device of this Device's User, and answers the
+  /// status code.
+  Future<int> logoutOthers() async {
+    final res = await _dio.post<void>(
+      '/auth/sessions/logout-others',
+      options: _authorized,
+    );
+    return res.statusCode!;
+  }
+
+  /// Makes a protected call with this Device's access token, and answers the
+  /// status code: 200 while its Session is live.
+  Future<int> echoStatus() async {
+    final res = await _dio.get<void>('/__e2e__/echo', options: _authorized);
+    return res.statusCode!;
+  }
+
+  Options get _authorized =>
+      Options(headers: {'Authorization': 'Bearer $accessToken'});
 
   /// Opens a live connection for this Device's Session, completing once the
   /// server has accepted it (and so joined it to its rooms).

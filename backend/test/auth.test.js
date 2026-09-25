@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
 
+import { refresh } from './support/auth.js';
 import {
   TEST_JWT_SECRET,
   TEST_OTP_CODE,
@@ -270,6 +271,34 @@ describe('POST /auth/otp/verify', () => {
         [sessionB, DEVICE_B, 'ios', null],
       ],
     );
+  });
+
+  it("replaces the Device's old Session when it signs in again", async () => {
+    const { app, sessionRevoked } = buildTestApp({ prisma });
+    const first = await verify(app);
+    const revoked = [];
+    sessionRevoked.subscribe((event) => revoked.push(event));
+
+    const second = await verify(app);
+
+    assert.equal(second.status, 200);
+    assertError(await refresh(app, first.body.refreshToken), 401, 'invalid_refresh_token');
+    assert.equal((await refresh(app, second.body.refreshToken)).status, 200);
+    assert.deepEqual(revoked, [
+      { sessionId: jwt.decode(first.body.accessToken).sessionId, userId: first.body.user.id },
+    ]);
+  });
+
+  it("leaves another User's Session on the same Device alone", async () => {
+    const { app, sessionRevoked } = buildTestApp({ prisma });
+    const someoneElse = await verify(app, { phoneNumber: '+14155550199' });
+    const revoked = [];
+    sessionRevoked.subscribe((event) => revoked.push(event));
+
+    await verify(app);
+
+    assert.equal((await refresh(app, someoneElse.body.refreshToken)).status, 200);
+    assert.deepEqual(revoked, []);
   });
 
   it('issues a 15-minute access token naming the User and the Session', async () => {

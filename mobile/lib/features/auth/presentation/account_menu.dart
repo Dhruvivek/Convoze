@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/formatting/display_name.dart';
+import '../data/auth_repository.dart';
 import 'auth_state.dart';
 
-/// The signed-in UI's account menu: who is signed in on this Device, and
-/// "Log out".
+/// The signed-in UI's account menu: who is signed in on this Device, "Log
+/// out other devices", and "Log out".
 class AccountMenu extends ConsumerWidget {
   const AccountMenu({super.key});
 
@@ -31,6 +32,11 @@ class AccountMenu extends ConsumerWidget {
         ),
         const Divider(),
         MenuItemButton(
+          leadingIcon: const Icon(Icons.devices_other),
+          onPressed: () => _logOutOtherDevices(context, ref),
+          child: const Text('Log out other devices'),
+        ),
+        MenuItemButton(
           leadingIcon: const Icon(Icons.logout),
           onPressed: () => ref.read(authStateProvider.notifier).signOut(),
           child: const Text('Log out'),
@@ -43,5 +49,19 @@ class AccountMenu extends ConsumerWidget {
             controller.isOpen ? controller.close() : controller.open(),
       ),
     );
+  }
+
+  /// This Device stays signed in whatever happens, so the outcome is only
+  /// reported.
+  Future<void> _logOutOtherDevices(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    String message;
+    try {
+      await ref.read(authRepositoryProvider).logoutOthers();
+      message = 'Logged out of your other devices';
+    } catch (_) {
+      message = "Couldn't log out your other devices. Try again.";
+    }
+    messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 }

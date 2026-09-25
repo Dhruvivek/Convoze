@@ -33,3 +33,8 @@ export function echo(app, authorization) {
   const req = request(app).get('/__e2e__/echo');
   return authorization === undefined ? req : req.set('Authorization', authorization);
 }
+
+export function logoutOthers(app, authorization) {
+  const req = request(app).post('/auth/sessions/logout-others');
+  return authorization === undefined ? req : req.set('Authorization', authorization);
+}

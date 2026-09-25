@@ -35,6 +35,9 @@ class _FakeAuthRepository implements AuthRepository {
     logouts++;
     if (logoutError case final error?) throw error;
   }
+
+  @override
+  Future<void> logoutOthers() async {}
 }
 
 ProviderContainer _container({

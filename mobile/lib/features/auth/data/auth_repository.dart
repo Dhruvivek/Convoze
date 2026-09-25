@@ -61,6 +61,14 @@ class AuthRepository {
     await _post<void>('/auth/logout');
   }
 
+  /// Ends every other Session of the signed-in User, leaving this Device's
+  /// working.
+  ///
+  /// Throws an [AuthFailure] when it can't.
+  Future<void> logoutOthers() async {
+    await _post<void>('/auth/sessions/logout-others');
+  }
+
   Future<Response<T>> _post<T>(String path, [Object? data]) async {
     try {
       return await _dio.post<T>(path, data: data);

@@ -21,16 +21,17 @@ function issuePair({ userId, sessionId, secret }, { jwtSecret, now, tokenTtls })
 }
 
 // Signs a verified phone number in on one Device: finds or creates its User
-// and opens a new Session, leaving the User's other Sessions untouched.
+// and opens a new Session in place of any the Device already had, leaving the
+// User's Sessions on other Devices untouched.
 export async function signIn(
   prisma,
   { phoneNumber, deviceId, platform },
-  { clock, jwtSecret, tokenTtls },
+  { clock, jwtSecret, tokenTtls, sessionRevoked },
 ) {
   const now = clock.now();
   const secret = generateRefreshSecret();
 
-  const { user, session } = await prisma.$transaction(async (tx) => {
+  const { user, session, replaced } = await prisma.$transaction(async (tx) => {
     // A single-unique-field upsert runs as INSERT ... ON CONFLICT, so two
     // first-time verifies racing for one number both land on the same User.
     const user = await tx.user.upsert({
@@ -38,6 +39,15 @@ export async function signIn(
       create: { phoneNumber, phoneVerifiedAt: now },
       update: { phoneVerifiedAt: now },
     });
+    // Expired ones too, as in logoutOthers.
+    const previous = await tx.session.findMany({
+      where: { userId: user.id, deviceId, revokedAt: null },
+      select: { id: true, userId: true },
+    });
+    const replaced = [];
+    for (const session of previous) {
+      if (await markRevoked(tx, session, now)) replaced.push(session);
+    }
     const session = await tx.session.create({
       data: {
         userId: user.id,
@@ -49,8 +59,10 @@ export async function signIn(
         lastUsedAt: now,
       },
     });
-    return { user, session };
+    return { user, session, replaced };
   });
+  // Only once committed: a rolled-back sign-in revoked nothing.
+  for (const { id, userId } of replaced) sessionRevoked.fire({ sessionId: id, userId });
 
   return {
     ...issuePair({ userId: user.id, sessionId: session.id, secret }, { jwtSecret, now, tokenTtls }),
@@ -104,15 +116,35 @@ export async function logout(prisma, { sessionId, userId }, { clock, sessionRevo
   await revokeSession(prisma, { id: sessionId, userId }, clock.now(), sessionRevoked);
 }
 
+// Signs every other Device out: ends each of the User's Sessions except the
+// caller's. Expired Sessions are ended too, since a Device's live connection
+// outlives its tokens and still needs to be dropped.
+export async function logoutOthers(prisma, { sessionId, userId }, { clock, sessionRevoked }) {
+  const now = clock.now();
+  const others = await prisma.session.findMany({
+    where: { userId, revokedAt: null, id: { not: sessionId } },
+    select: { id: true, userId: true },
+  });
+  for (const session of others) await revokeSession(prisma, session, now, sessionRevoked);
+}
+
 // Every revocation goes through here, so the hook fires for each one: on
-// logout, and on reuse of a secret that isn't the Session's current one,
-// which has already been rotated away, so someone else may hold the Session
-// and it ends for everyone (ADR 0003). Conditional on the Session still being
-// open, so of several concurrent revocations only one fires the hook.
-async function revokeSession(prisma, { id, userId }, now, sessionRevoked) {
-  const { count } = await prisma.session.updateMany({
+// logout, logout-others, and on reuse of a secret that isn't the Session's
+// current one, which has already been rotated away, so someone else may hold
+// the Session and it ends for everyone (ADR 0003). Signing in again on a
+// Device revokes inside its own transaction and fires once that commits.
+async function revokeSession(prisma, session, now, sessionRevoked) {
+  if (await markRevoked(prisma, session, now)) {
+    sessionRevoked.fire({ sessionId: session.id, userId: session.userId });
+  }
+}
+
+// Conditional on the Session still being open, so of several concurrent
+// revocations only one reports it, and only that one fires the hook.
+async function markRevoked(client, { id }, now) {
+  const { count } = await client.session.updateMany({
     where: { id, revokedAt: null },
     data: { revokedAt: now },
   });
-  if (count > 0) sessionRevoked.fire({ sessionId: id, userId });
+  return count > 0;
 }

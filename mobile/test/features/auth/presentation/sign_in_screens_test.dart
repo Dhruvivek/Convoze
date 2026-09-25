@@ -32,6 +32,9 @@ class _FakeAuthRepository implements AuthRepository {
 
   @override
   Future<void> logout() async {}
+
+  @override
+  Future<void> logoutOthers() async {}
 }
 
 const _phoneNumber = '+14155550100';
