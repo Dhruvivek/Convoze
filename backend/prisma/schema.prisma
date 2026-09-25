@@ -1,7 +1,9 @@
-// Schema per ADR 0004 (docs/adr/0004-postgres-schema-and-orm.md). Only the
-// auth tables (#20) and the bare Conversation/Participant tables (#21) exist
-// so far; later specs add the rest, and their columns (e.g.
-// Participant.lastReadMessageId once Message exists).
+// Schema per ADR 0004 (docs/adr/0004-postgres-schema-and-orm.md), amended by
+// ADR 0008 (docs/adr/0008-message-delivery-pipeline-update-log-and-sync-cursor.md)
+// for Message/Reaction/the Update log, and ADR 0009
+// (docs/adr/0009-local-first-client-data-layer.md) for the Delivery
+// watermark. #47 lays these down; later specs add Conversation preferences
+// (ADR 0009) and media columns on Message (ADR 0002).
 //
 // Requires PostgreSQL 18+: primary keys default to the native uuidv7().
 
@@ -28,15 +30,25 @@ enum ParticipantRole {
   member
 }
 
+// Constrained to `text` for now (#47); media columns and the rest of this
+// enum (image | file | video) are a later spec's job (ADR 0004).
+enum MessageType {
+  text
+}
+
 model User {
-  id              String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  phoneNumber     String    @unique
-  phoneVerifiedAt DateTime  @db.Timestamptz(3)
+  id              String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  phoneNumber     String        @unique
+  phoneVerifiedAt DateTime      @db.Timestamptz(3)
   displayName     String?
   avatarUrl       String?
-  createdAt       DateTime  @default(now()) @db.Timestamptz(3)
+  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
   sessions        Session[]
   participants    Participant[]
+  messages        Message[]
+  reactions       Reaction[]
+  userSeq         UserSeq?
+  userUpdates     UserUpdate[]
 }
 
 model Session {
@@ -73,6 +85,8 @@ model Conversation {
   directKey    String?          @unique
   createdAt    DateTime         @default(now()) @db.Timestamptz(3)
   participants Participant[]
+  messages     Message[]
+  userUpdates  UserUpdate[]
 }
 
 // Any code that creates or deletes a Participant row must also call
@@ -88,6 +102,94 @@ model Participant {
   role           ParticipantRole @default(member)
   joinedAt       DateTime        @default(now()) @db.Timestamptz(3)
 
+  // Read/Delivery watermarks (`CONTEXT.md`; ADR 0004 amended by ADR 0008):
+  // the last Message this Participant has read/had reach a Device. Moved
+  // forward only, and the delivery watermark is always at or ahead of the
+  // read one — enforced by the code that moves them, not the database.
+  lastReadMessageId      String?  @db.Uuid
+  lastReadMessage        Message? @relation("ParticipantReadWatermark", fields: [lastReadMessageId], references: [id], onDelete: SetNull)
+  lastDeliveredMessageId String?  @db.Uuid
+  lastDeliveredMessage   Message? @relation("ParticipantDeliveredWatermark", fields: [lastDeliveredMessageId], references: [id], onDelete: SetNull)
+
   @@unique([conversationId, userId])
   @@index([userId])
+}
+
+// Per ADR 0008. `replyToMessageId` must point at a Message in the same
+// Conversation and `linkPreview`'s shape (`{url, title, description}`,
+// never fetched server-side) is validated in application code, not here.
+model Message {
+  id             String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  conversationId String       @db.Uuid
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String       @db.Uuid
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  // Client-generated; unique with senderId so a retried `message:send` is
+  // safe (ADR 0008).
+  clientMsgId String @db.Uuid
+
+  replyToMessageId String?   @db.Uuid
+  replyToMessage   Message?  @relation("MessageReply", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies          Message[] @relation("MessageReply")
+
+  linkPreview Json?
+  type        MessageType @default(text)
+  content     String?
+  isDeleted   Boolean     @default(false)
+  createdAt   DateTime    @default(now()) @db.Timestamptz(3)
+  editedAt    DateTime?   @db.Timestamptz(3)
+
+  reactions            Reaction[]
+  userUpdates          UserUpdate[]
+  readWatermarkOf      Participant[] @relation("ParticipantReadWatermark")
+  deliveredWatermarkOf Participant[] @relation("ParticipantDeliveredWatermark")
+
+  @@unique([senderId, clientMsgId])
+  @@index([conversationId, createdAt])
+}
+
+model Reaction {
+  id        String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  messageId String   @db.Uuid
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emoji     String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@unique([messageId, userId, emoji])
+}
+
+// Created lazily by the Update writer (`src/messaging/updateWriter.js`) on a
+// User's first Update, rather than for every User up front (ADR 0008).
+model UserSeq {
+  userId  String @id @db.Uuid
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastSeq BigInt @default(0)
+}
+
+// One User's Update log (`CONTEXT.md`; ADR 0008). Rows carry references,
+// never copies: `src/messaging/hydrator.js` resolves them to the referenced
+// Message/Conversation's *current* state when it drains.
+//
+// `kind` is one of `src/messaging/kinds.js`'s UPDATE_KINDS, checked in
+// application code rather than a Postgres enum: this table's vocabulary
+// (`message.new`, `conversation.receipts`, ...) uses '.', which isn't a
+// legal Prisma enum value.
+model UserUpdate {
+  id     String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seq    BigInt
+  kind   String
+
+  conversationId String?       @db.Uuid
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  messageId      String?       @db.Uuid
+  message        Message?      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@unique([userId, seq])
 }
