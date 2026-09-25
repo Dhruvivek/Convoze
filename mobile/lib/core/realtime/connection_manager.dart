@@ -5,6 +5,9 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import '../../features/auth/presentation/auth_state.dart';
+import '../network/dio_provider.dart';
+import '../network/session_refresher.dart';
+import '../storage/jwt.dart';
 import '../storage/token_store.dart';
 import 'socket_factory.dart';
 
@@ -32,13 +35,29 @@ enum ConnectionStatus {
 /// deliberately, and returning to the foreground ([AppLifecycleState.resumed])
 /// reconnects. `.inactive` (e.g. a brief system UI overlay) is ignored.
 class ConnectionManager with WidgetsBindingObserver {
-  ConnectionManager({required this._createSocket, required this._tokenStore}) {
+  ConnectionManager({
+    required this._createSocket,
+    required this._tokenStore,
+    required this._sessionRefresher,
+  }) {
     WidgetsBinding.instance.addObserver(this);
   }
 
   final SocketFactory _createSocket;
   final TokenStore _tokenStore;
+  final SessionRefresher _sessionRefresher;
   final _statusChanges = StreamController<ConnectionStatus>.broadcast();
+
+  /// How long before its expiry an access token is treated as due for
+  /// renewal, so a handshake sent just under the wire doesn't land at the
+  /// server already expired.
+  static const _refreshSkew = Duration(seconds: 60);
+
+  /// The generation, if any, that has already had one refresh-and-retry
+  /// after a handshake rejected for an unauthenticated token. Bounded to one
+  /// entry rather than a growing set, since only the current generation is
+  /// ever checked again.
+  int? _authRetryGeneration;
 
   /// Whether there's a Session to connect for. Backgrounding while this is
   /// false (or foregrounding before it's true) does nothing.
@@ -71,13 +90,23 @@ class ConnectionManager with WidgetsBindingObserver {
     if (_status != ConnectionStatus.offline) return;
     final generation = ++_generation;
     _setStatus(ConnectionStatus.connecting);
-    final accessToken = await _tokenStore.readAccessToken();
+    final ready = await _ensureFreshToken();
     if (generation != _generation) return;
+    if (!ready) {
+      // The Session turned out to be dead; the shared refresher has already
+      // sent the app to login. Nothing to connect for.
+      _setStatus(ConnectionStatus.offline);
+      return;
+    }
 
     // A socket the server refused is dead; don't leave it lying around.
     _socket?.dispose();
     // In the handshake's auth payload, never the URL: URLs end up in logs.
-    final socket = _createSocket()..auth = {'token': accessToken};
+    // A function rather than a fixed map, so it's re-read — and the token
+    // re-checked for freshness — on every automatic reconnect too, not just
+    // this explicit connect (the "library check" from #32).
+    final socket = _createSocket()
+      ..auth = (callback) => unawaited(_authenticate(generation, callback));
     _socket = socket;
     void onChange(ConnectionStatus Function() next) {
       if (identical(_socket, socket)) _setStatus(next());
@@ -93,18 +122,68 @@ class ConnectionManager with WidgetsBindingObserver {
               : ConnectionStatus.offline,
         ),
       )
+      ..onConnectError((data) => _onConnectError(socket, generation, data))
+      ..connect();
+  }
+
+  /// Supplies the handshake's auth payload for every (re)connect attempt
+  /// this socket makes, including the automatic ones after a dropped
+  /// transport that never go through [connect].
+  Future<void> _authenticate(int generation, dynamic callback) async {
+    await _ensureFreshToken();
+    if (generation != _generation) return;
+    callback({'token': await _tokenStore.readAccessToken()});
+  }
+
+  /// A handshake rejected because the token had already expired: refresh
+  /// once and retry once, rather than treating it like any other refusal.
+  void _onConnectError(io.Socket socket, int generation, dynamic data) {
+    if (!identical(_socket, socket)) return;
+    if (data == 'unauthenticated' && _authRetryGeneration != generation) {
+      _authRetryGeneration = generation;
+      unawaited(_retryAfterUnauthenticated(socket, generation));
+      return;
+    }
+    _setStatus(
       // Inactive after a connect_error means the server refused the
       // handshake; active means it couldn't be reached and will be retried.
-      ..onConnectError(
-        (_) => onChange(
-          () => !socket.active
-              ? ConnectionStatus.offline
-              : _status == ConnectionStatus.connecting
-              ? ConnectionStatus.connecting
-              : ConnectionStatus.reconnecting,
-        ),
-      )
-      ..connect();
+      !socket.active
+          ? ConnectionStatus.offline
+          : _status == ConnectionStatus.connecting
+          ? ConnectionStatus.connecting
+          : ConnectionStatus.reconnecting,
+    );
+  }
+
+  Future<void> _retryAfterUnauthenticated(
+    io.Socket socket,
+    int generation,
+  ) async {
+    final refreshed = await _sessionRefresher.refresh();
+    if (generation != _generation || !identical(_socket, socket)) return;
+    if (!refreshed) {
+      _setStatus(ConnectionStatus.offline);
+      return;
+    }
+    socket.connect();
+  }
+
+  /// Refreshes the stored access token first if it's expired or close to it,
+  /// reusing the single-flight refresh the Dio auth interceptor also uses
+  /// (ADR 0005). False when the Session turned out to be dead.
+  Future<bool> _ensureFreshToken() async {
+    final token = await _tokenStore.readAccessToken();
+    if (token == null || !_needsRefresh(token)) return true;
+    return _sessionRefresher.refresh();
+  }
+
+  /// True only when the token's own `exp` claim says so. A token that can't
+  /// be read this way (never expected in practice) is left to the reactive
+  /// fallback instead of guessed at here.
+  bool _needsRefresh(String token) {
+    final expiry = jwtExpiry(token);
+    return expiry != null &&
+        expiry.isBefore(DateTime.now().toUtc().add(_refreshSkew));
   }
 
   /// Closes the connection, if any, and stops any retrying.
@@ -161,6 +240,7 @@ ConnectionManager connectionManager(Ref ref) {
   final manager = ConnectionManager(
     createSocket: ref.watch(socketFactoryProvider),
     tokenStore: ref.watch(tokenStoreProvider),
+    sessionRefresher: ref.watch(sessionRefresherProvider),
   );
   ref.onDispose(manager.dispose);
   ref.listen(authStateProvider, (_, auth) {

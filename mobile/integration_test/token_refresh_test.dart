@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:convoze/app.dart';
 import 'package:convoze/core/network/dio_provider.dart';
 import 'package:convoze/features/auth/presentation/otp_entry_screen.dart';
@@ -10,6 +8,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/e2e.dart';
+import 'support/other_device.dart' show sessionIdOf;
 
 const _storage = FlutterSecureStorage();
 
@@ -36,12 +35,8 @@ Dio _api(WidgetTester tester) =>
 Future<Response<Map<String, dynamic>>> _echo(WidgetTester tester) =>
     _api(tester).get<Map<String, dynamic>>('/__e2e__/echo');
 
-Future<String> _sessionId() async {
-  final accessToken = (await _storage.read(key: 'access_token'))!;
-  final claims = accessToken.split('.')[1];
-  final json = utf8.decode(base64Url.decode(base64Url.normalize(claims)));
-  return (jsonDecode(json) as Map<String, dynamic>)['sessionId'] as String;
-}
+Future<String> _sessionId() async =>
+    sessionIdOf((await _storage.read(key: 'access_token'))!);
 
 Future<void> _wait(Duration duration) => Future<void>.delayed(duration);
 

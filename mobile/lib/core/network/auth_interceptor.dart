@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 
 import '../storage/token_store.dart';
+import 'session_refresher.dart';
 
 /// Signs every API request with the Session's access token, and renews an
 /// expired one silently: on a 401 it refreshes the Session and retries the
@@ -8,20 +9,15 @@ import '../storage/token_store.dart';
 class AuthInterceptor extends Interceptor {
   AuthInterceptor({
     required this._dio,
-    required this._refreshDio,
     required this._tokenStore,
-    required this._onSessionEnded,
+    required this._sessionRefresher,
   });
 
   static const _retriedKey = 'authInterceptor.retried';
 
   final Dio _dio;
-
-  /// Refreshes go through their own Dio, so they never pass back through
-  /// this interceptor.
-  final Dio _refreshDio;
   final TokenStore _tokenStore;
-  final void Function() _onSessionEnded;
+  final SessionRefresher _sessionRefresher;
 
   @override
   Future<void> onRequest(
@@ -77,39 +73,6 @@ class AuthInterceptor extends Interceptor {
     final current = await _tokenStore.readAccessToken();
     if (current == null) return false;
     if (options.headers['Authorization'] != 'Bearer $current') return true;
-    return _refreshing ??= _refresh().whenComplete(() => _refreshing = null);
-  }
-
-  /// The refresh in flight, which every concurrent 401 waits on rather than
-  /// starting its own: the server treats a second use of one refresh token
-  /// as theft.
-  Future<bool>? _refreshing;
-
-  Future<bool> _refresh() async {
-    final Response<Map<String, dynamic>> res;
-    try {
-      res = await _refreshDio.post<Map<String, dynamic>>(
-        '/auth/refresh',
-        data: {'refreshToken': await _tokenStore.readRefreshToken()},
-      );
-    } on DioException catch (e) {
-      // Only the server saying no ends the Session; being unreachable or
-      // failing doesn't, so the next request can try again.
-      final status = e.response?.statusCode;
-      if (status == 400 || status == 401) await _endSession();
-      return false;
-    }
-    await _tokenStore.saveTokens(
-      accessToken: res.data!['accessToken'] as String,
-      refreshToken: res.data!['refreshToken'] as String,
-    );
-    return true;
-  }
-
-  /// Forgets the Session (the Device ID stays: it names this install) and
-  /// tells the app, which sends the user back to login.
-  Future<void> _endSession() async {
-    await _tokenStore.clearSession();
-    _onSessionEnded();
+    return _sessionRefresher.refresh();
   }
 }

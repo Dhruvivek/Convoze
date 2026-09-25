@@ -47,4 +47,58 @@ final class DioProvider extends $FunctionalProvider<Dio, Dio, Dio>
   }
 }
 
-String _$dioHash() => r'57d9fa65c842e8f4797e6ea42cebceb38bdfc937';
+String _$dioHash() => r'ea6d850a5c119bb8745b19815a898ce4e8794a61';
+
+/// Shared by [AuthInterceptor] and the connection manager (ADR 0005), so a
+/// Session is refreshed at most once at a time whichever of them needs it.
+
+@ProviderFor(sessionRefresher)
+final sessionRefresherProvider = SessionRefresherProvider._();
+
+/// Shared by [AuthInterceptor] and the connection manager (ADR 0005), so a
+/// Session is refreshed at most once at a time whichever of them needs it.
+
+final class SessionRefresherProvider
+    extends
+        $FunctionalProvider<
+          SessionRefresher,
+          SessionRefresher,
+          SessionRefresher
+        >
+    with $Provider<SessionRefresher> {
+  /// Shared by [AuthInterceptor] and the connection manager (ADR 0005), so a
+  /// Session is refreshed at most once at a time whichever of them needs it.
+  SessionRefresherProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'sessionRefresherProvider',
+        isAutoDispose: false,
+        dependencies: null,
+        $allTransitiveDependencies: null,
+      );
+
+  @override
+  String debugGetCreateSourceHash() => _$sessionRefresherHash();
+
+  @$internal
+  @override
+  $ProviderElement<SessionRefresher> $createElement($ProviderPointer pointer) =>
+      $ProviderElement(pointer);
+
+  @override
+  SessionRefresher create(Ref ref) {
+    return sessionRefresher(ref);
+  }
+
+  /// {@macro riverpod.override_with_value}
+  Override overrideWithValue(SessionRefresher value) {
+    return $ProviderOverride(
+      origin: this,
+      providerOverride: $SyncValueProvider<SessionRefresher>(value),
+    );
+  }
+}
+
+String _$sessionRefresherHash() => r'7a6e27204f6423462dd12fd7d5e79c71302f9a06';

@@ -1,10 +1,15 @@
+import 'package:convoze/core/network/session_refresher.dart';
 import 'package:convoze/core/realtime/connection_manager.dart';
 import 'package:convoze/core/storage/token_store.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:socket_io_client/src/manager.dart';
+
+import '../../support/fake_backend.dart';
+import '../../support/fake_jwt.dart';
 
 /// A [io.Socket] double that does no real IO: [connect] is a no-op and the
 /// test drives `connect`/`disconnect`/`connect_error` by hand via
@@ -15,11 +20,18 @@ class _TestSocket extends io.Socket {
 
   bool active_ = true;
 
+  /// How many times [connect] has been called, so a test can tell a
+  /// refresh-and-retry apart from giving up.
+  int connectCalls = 0;
+
   @override
   bool get active => active_;
 
   @override
-  io.Socket connect() => this;
+  io.Socket connect() {
+    connectCalls++;
+    return this;
+  }
 
   @override
   io.Socket disconnect() {
@@ -44,11 +56,20 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late List<_TestSocket> sockets;
+  late FakeBackend backend;
+  late TokenStore tokenStore;
+  late int sessionEndedCalls;
   late ConnectionManager manager;
 
   setUp(() async {
-    FlutterSecureStorage.setMockInitialValues({'access_token': 'access'});
+    FlutterSecureStorage.setMockInitialValues({
+      'access_token': fakeJwt(secondsFromNow: 3600),
+      'refresh_token': 'refresh-1',
+    });
     sockets = [];
+    backend = FakeBackend();
+    sessionEndedCalls = 0;
+    tokenStore = TokenStore(const FlutterSecureStorage());
     manager = ConnectionManager(
       createSocket: () {
         final socket = _TestSocket(
@@ -57,7 +78,12 @@ void main() {
         sockets.add(socket);
         return socket;
       },
-      tokenStore: TokenStore(const FlutterSecureStorage()),
+      tokenStore: tokenStore,
+      sessionRefresher: SessionRefresher(
+        refreshDio: Dio()..httpClientAdapter = backend,
+        tokenStore: tokenStore,
+        onSessionEnded: () => sessionEndedCalls++,
+      ),
     );
   });
 
@@ -138,18 +164,21 @@ void main() {
     expect(manager.status, ConnectionStatus.offline);
   });
 
-  test('disconnect() closes the socket and stops reporting its events', () async {
-    await manager.connect();
-    final socket = sockets.single;
-    socket.emitReserved('connect');
+  test(
+    'disconnect() closes the socket and stops reporting its events',
+    () async {
+      await manager.connect();
+      final socket = sockets.single;
+      socket.emitReserved('connect');
 
-    manager.disconnect();
-    expect(manager.status, ConnectionStatus.offline);
+      manager.disconnect();
+      expect(manager.status, ConnectionStatus.offline);
 
-    // A late event from the now-superseded socket must not resurrect it.
-    socket.emitReserved('connect');
-    expect(manager.status, ConnectionStatus.offline);
-  });
+      // A late event from the now-superseded socket must not resurrect it.
+      socket.emitReserved('connect');
+      expect(manager.status, ConnectionStatus.offline);
+    },
+  );
 
   group('app lifecycle', () {
     test('paused, hidden and detached disconnect while authenticated', () {
@@ -193,6 +222,98 @@ void main() {
 
       manager.didChangeAppLifecycleState(AppLifecycleState.paused);
       expect(manager.status, ConnectionStatus.offline);
+    });
+  });
+
+  group('token freshness on connect (#32)', () {
+    test('a token close to expiry is refreshed before connecting', () async {
+      await tokenStore.saveTokens(
+        accessToken: fakeJwt(secondsFromNow: 30),
+        refreshToken: 'refresh-1',
+      );
+
+      await manager.connect();
+
+      expect(backend.refreshCalls, 1);
+      expect(await tokenStore.readAccessToken(), backend.accessToken);
+      expect(sockets, hasLength(1));
+    });
+
+    test('an already-fresh token is not refreshed', () async {
+      await manager.connect();
+
+      expect(backend.refreshCalls, 0);
+    });
+
+    test(
+      'a dead refresh token ends the Session instead of opening a socket',
+      () async {
+        await tokenStore.saveTokens(
+          accessToken: fakeJwt(secondsFromNow: 30),
+          refreshToken: 'refresh-1',
+        );
+        backend.refreshStatus = 401;
+
+        await manager.connect();
+
+        expect(manager.status, ConnectionStatus.offline);
+        expect(sockets, isEmpty);
+        expect(sessionEndedCalls, 1);
+      },
+    );
+
+    test(
+      'a handshake rejected as unauthenticated refreshes once and retries',
+      () async {
+        await manager.connect();
+        final socket = sockets.single;
+        socket.active_ = false;
+
+        socket.emitReserved('connect_error', 'unauthenticated');
+        await pumpEventQueue();
+
+        expect(backend.refreshCalls, 1);
+        expect(socket.connectCalls, 2);
+
+        socket.emitReserved('connect');
+        expect(manager.status, ConnectionStatus.connected);
+      },
+    );
+
+    test(
+      'a second unauthenticated rejection on the retry does not loop',
+      () async {
+        await manager.connect();
+        final socket = sockets.single;
+        socket.active_ = false;
+        socket.emitReserved('connect_error', 'unauthenticated');
+        await pumpEventQueue();
+        expect(socket.connectCalls, 2);
+
+        socket.active_ = false;
+        socket.emitReserved('connect_error', 'unauthenticated');
+        await pumpEventQueue();
+
+        expect(backend.refreshCalls, 1);
+        expect(socket.connectCalls, 2);
+        expect(manager.status, ConnectionStatus.offline);
+      },
+    );
+
+    test('an unauthenticated rejection with a dead refresh token ends the '
+        'Session and stops retrying', () async {
+      backend.refreshStatus = 401;
+      await manager.connect();
+      final socket = sockets.single;
+      socket.active_ = false;
+
+      socket.emitReserved('connect_error', 'unauthenticated');
+      await pumpEventQueue();
+
+      expect(backend.refreshCalls, 1);
+      expect(socket.connectCalls, 1);
+      expect(manager.status, ConnectionStatus.offline);
+      expect(sessionEndedCalls, 1);
     });
   });
 }
