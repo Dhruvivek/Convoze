@@ -78,8 +78,8 @@ export function createE2eRouter({
     res.json({ count: refreshCounter.count(req.params.sessionId) });
   });
 
-  // Only the sockets that connect afterwards join its room, as with any
-  // Conversation created while its Participants are connected.
+  // Already-connected Participants join the new Conversation's room right
+  // away, as any code creating Participant rows must (#30).
   router.post('/conversations', async (req, res) => {
     const conversation = await seedConversation(prisma, req.body ?? {}, clock.now());
     if (!conversation) {
@@ -91,7 +91,22 @@ export function createE2eRouter({
       );
       return;
     }
+    for (const { userId } of conversation.participants) {
+      realtime.joinUserToConversation({ userId, conversationId: conversation.id });
+    }
     res.status(201).json(conversation);
+  });
+
+  // Removes a Participant, taking any of their live sockets out of the
+  // Conversation's room right away, as any code deleting Participant rows
+  // must (#30).
+  router.delete('/conversations/:conversationId/participants/:userId', async (req, res) => {
+    const { conversationId, userId } = req.params;
+    const { count } = await prisma.participant.deleteMany({
+      where: { conversationId, userId },
+    });
+    if (count > 0) realtime.removeUserFromConversation({ userId, conversationId });
+    res.status(204).end();
   });
 
   // Sends `payload` as an `e2e:test` event to everyone in `room`, so room

@@ -58,5 +58,24 @@ export function createRealtime({ prisma, authenticate }) {
     socket.on('disconnect', () => registry.unregister(socket.id));
   });
 
-  return { io, registry };
+  // Moves an already-connected user's live sockets, across every Device, into
+  // or out of a Conversation's room without them reconnecting. A no-op while
+  // the user is offline: their next connection's auto-join picks up the
+  // current Participant rows instead (ADR 0005).
+  function changeConversationMembership(action, { userId, conversationId }) {
+    const socketIds = registry.socketsForUser(userId);
+    if (socketIds.length > 0) io.in(socketIds)[action](conversationRoom(conversationId));
+  }
+
+  // Any code that creates a Participant row must call this.
+  function joinUserToConversation(args) {
+    changeConversationMembership('socketsJoin', args);
+  }
+
+  // Any code that deletes a Participant row must call this.
+  function removeUserFromConversation(args) {
+    changeConversationMembership('socketsLeave', args);
+  }
+
+  return { io, registry, joinUserToConversation, removeUserFromConversation };
 }

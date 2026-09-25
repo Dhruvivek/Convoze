@@ -75,6 +75,10 @@ model Conversation {
   participants Participant[]
 }
 
+// Any code that creates or deletes a Participant row must also call
+// `joinUserToConversation` / `removeUserFromConversation`
+// (`src/realtime/server.js`), so an already-connected user's live sockets
+// join or leave that Conversation's room without reconnecting (#30).
 model Participant {
   id             String          @id @default(dbgenerated("uuidv7()")) @db.Uuid
   conversationId String          @db.Uuid

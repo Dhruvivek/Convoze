@@ -16,6 +16,33 @@ beforeEach(() => resetDatabase(prisma));
 let server;
 afterEach(() => server?.stop());
 
+const ALICE = '+14155550100';
+const BOB = '+14155550101';
+const CAROL = '+14155550102';
+
+function seedConversation(participantPhoneNumbers, type = 'group') {
+  return request(server.app)
+    .post('/__e2e__/conversations')
+    .send({ type, participantPhoneNumbers });
+}
+
+async function emitTo(room, payload) {
+  const res = await request(server.app).post('/__e2e__/emit').send({ room, payload });
+  assert.equal(res.status, 204);
+}
+
+async function connectAs(phoneNumber, deviceId) {
+  const { accessToken, user } = await signIn(server.app, { phoneNumber, deviceId });
+  const socket = await connect(server.client({ auth: { token: accessToken } }));
+  return { socket, userId: user.id };
+}
+
+function removeParticipant(conversationId, userId) {
+  return request(server.app).delete(
+    `/__e2e__/conversations/${conversationId}/participants/${userId}`,
+  );
+}
+
 describe('realtime handshake', () => {
   it('accepts a valid access token in the auth payload', async () => {
     server = await startTestServer({ prisma });
@@ -84,27 +111,6 @@ describe('realtime handshake', () => {
 });
 
 describe('realtime rooms', () => {
-  const ALICE = '+14155550100';
-  const BOB = '+14155550101';
-  const CAROL = '+14155550102';
-
-  function seedConversation(participantPhoneNumbers, type = 'group') {
-    return request(server.app)
-      .post('/__e2e__/conversations')
-      .send({ type, participantPhoneNumbers });
-  }
-
-  async function emitTo(room, payload) {
-    const res = await request(server.app).post('/__e2e__/emit').send({ room, payload });
-    assert.equal(res.status, 204);
-  }
-
-  async function connectAs(phoneNumber) {
-    const { accessToken, user } = await signIn(server.app, { phoneNumber });
-    const socket = await connect(server.client({ auth: { token: accessToken } }));
-    return { socket, userId: user.id };
-  }
-
   it('joins a socket to the rooms of the Conversations it participates in, and no others', async () => {
     server = await startTestServer({ prisma, e2eMode: true });
     const shared = await seedConversation([ALICE, BOB]);
@@ -172,6 +178,58 @@ describe('realtime rooms', () => {
 
     assert.equal(res.status, 400);
     assert.equal(res.body.error.code, 'invalid_request');
+  });
+});
+
+describe('room membership helpers', () => {
+  it("joins every one of an already-connected user's Devices to a new Conversation's room, without reconnecting", async () => {
+    server = await startTestServer({ prisma, e2eMode: true });
+    const first = await connectAs(ALICE, 'device-1');
+    const second = await connectAs(ALICE, 'device-2');
+
+    const conversation = await seedConversation([ALICE, BOB]);
+    const receivedFirst = nextEvent(first.socket, E2E_TEST_EVENT);
+    const receivedSecond = nextEvent(second.socket, E2E_TEST_EVENT);
+    await emitTo(`conversation:${conversation.body.id}`, { n: 1 });
+
+    assert.deepEqual(await receivedFirst, { n: 1 });
+    assert.deepEqual(await receivedSecond, { n: 1 });
+  });
+
+  it("removes every one of a user's Devices from a Conversation's room, without disconnecting them", async () => {
+    server = await startTestServer({ prisma, e2eMode: true });
+    const first = await connectAs(ALICE, 'device-1');
+    const second = await connectAs(ALICE, 'device-2');
+    const conversation = await seedConversation([ALICE, BOB]);
+
+    const receivedFirstBefore = nextEvent(first.socket, E2E_TEST_EVENT);
+    const receivedSecondBefore = nextEvent(second.socket, E2E_TEST_EVENT);
+    await emitTo(`conversation:${conversation.body.id}`, { n: 1 });
+    assert.deepEqual(await receivedFirstBefore, { n: 1 });
+    assert.deepEqual(await receivedSecondBefore, { n: 1 });
+
+    const res = await removeParticipant(conversation.body.id, first.userId);
+    assert.equal(res.status, 204);
+
+    const missedFirst = nextEvent(first.socket, E2E_TEST_EVENT);
+    const missedSecond = nextEvent(second.socket, E2E_TEST_EVENT);
+    await emitTo(`conversation:${conversation.body.id}`, { n: 2 });
+
+    assert.equal(await missedFirst, timedOut);
+    assert.equal(await missedSecond, timedOut);
+    assert.equal(first.socket.connected, true);
+    assert.equal(second.socket.connected, true);
+  });
+
+  it('is a no-op to join or remove a user with no live sockets', async () => {
+    server = await startTestServer({ prisma, e2eMode: true });
+    const { user: bob } = await signIn(server.app, { phoneNumber: BOB });
+
+    // Neither call should throw for an offline user.
+    const conversation = await seedConversation([ALICE, BOB]);
+    assert.equal(conversation.status, 201);
+    const res = await removeParticipant(conversation.body.id, bob.id);
+    assert.equal(res.status, 204);
   });
 });
 

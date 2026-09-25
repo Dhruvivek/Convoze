@@ -41,6 +41,12 @@ export function createConnectionRegistry() {
       return [...(socketsBySession.get(sessionId) ?? [])];
     },
 
+    // Every live socket of the user, across all their Sessions/Devices.
+    socketsForUser(userId) {
+      const sessionIds = sessionsByUser.get(userId) ?? [];
+      return [...sessionIds].flatMap((sessionId) => [...(socketsBySession.get(sessionId) ?? [])]);
+    },
+
     isOnline(userId) {
       return sessionsByUser.has(userId);
     },
