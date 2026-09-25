@@ -104,6 +104,18 @@ class E2eBackend {
     return res.data!['id'] as String;
   }
 
+  /// Fast-fills [conversationId] with [count] Messages from [senderId],
+  /// bypassing `message:send`/the Update log (#55's pagination fixture) —
+  /// only ever reachable through `GET .../messages`, never a live Update.
+  Future<void> seedMessages(
+    String conversationId, {
+    required int count,
+    required String senderId,
+  }) => _post(
+    '/__e2e__/conversations/$conversationId/messages/seed',
+    data: {'count': count, 'senderId': senderId},
+  );
+
   /// Sends [payload] as an `e2e:test` event to every socket in [room]
   /// (`conversation:<id>` or `user:<id>`).
   Future<void> emitTestEvent(String room, Map<String, Object?> payload) =>

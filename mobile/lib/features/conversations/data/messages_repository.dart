@@ -77,6 +77,16 @@ class MessagesRepository {
     });
   }
 
+  /// Whether any Message for [conversationId] is already in the replica —
+  /// the chat screen's "fetch the first page on open" trigger (#55).
+  Future<bool> hasLocalMessages(String conversationId) async {
+    final row = await (db.select(db.messages)
+          ..where((t) => t.conversationId.equals(conversationId))
+          ..limit(1))
+        .getSingleOrNull();
+    return row != null;
+  }
+
   /// Queues [text] in the Outbox (ADR 0009) and, if connected, kicks the
   /// drainer right away rather than waiting for the next reconnect.
   Future<void> send(
