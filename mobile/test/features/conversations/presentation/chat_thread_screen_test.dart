@@ -5,6 +5,7 @@ import 'package:convoze/core/db/database_provider.dart';
 import 'package:convoze/core/storage/token_store.dart';
 import 'package:convoze/core/sync/sync_engine.dart';
 import 'package:convoze/features/conversations/data/messages_repository.dart';
+import 'package:convoze/features/conversations/data/typing_repository.dart';
 import 'package:convoze/features/conversations/presentation/chat_thread_screen.dart';
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart' hide isNull;
@@ -13,6 +14,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:socket_io_client/socket_io_client.dart' as io;
+import 'package:socket_io_client/src/manager.dart';
+
+/// Records every outgoing `emit` (as `(event, conversationId)`) instead of
+/// touching the network.
+class _RecordingSocket extends io.Socket {
+  _RecordingSocket()
+    : super(Manager(uri: 'http://fake', options: {'autoConnect': false}), '/', const {});
+
+  final sent = <(String, String)>[];
+
+  @override
+  void emit(String event, [dynamic data]) {
+    final payload = (data as Map).cast<String, dynamic>();
+    sent.add((event, payload['conversationId'] as String));
+  }
+}
 
 const me = 'user-me';
 const other = 'user-other';
@@ -55,6 +73,8 @@ Future<void> _disposeCleanly(WidgetTester tester) async {
 void main() {
   late AppDatabase db;
   late MessagesRepository repo;
+  late TypingRepository typingRepo;
+  late _RecordingSocket typingSocket;
 
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({
@@ -72,6 +92,8 @@ void main() {
       syncEngine: syncEngine,
       currentSocket: () => null,
     );
+    typingSocket = _RecordingSocket();
+    typingRepo = TypingRepository(tokenStore: tokenStore)..attach(typingSocket);
   });
 
   tearDown(() => db.close());
@@ -126,6 +148,7 @@ void main() {
       overrides: [
         appDatabaseProvider.overrideWithValue(db),
         messagesRepositoryProvider.overrideWithValue(repo),
+        typingRepositoryProvider.overrideWithValue(typingRepo),
       ],
       child: const MaterialApp(
         home: ChatThreadScreen(conversationId: conversationId),
@@ -244,5 +267,53 @@ void main() {
     expect(find.text('Say hi 👋'), findsOneWidget);
 
     await _disposeCleanly(tester);
+  });
+
+  group('typing (#35)', () {
+    testWidgets('typing in the composer sends typing', (tester) async {
+      await seedConversationWithMessages();
+      await tester.pumpWidget(buildScreen());
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(ChatThreadScreen.composerFieldKey),
+        'h',
+      );
+
+      expect(typingSocket.sent, [('typing', conversationId)]);
+
+      await _disposeCleanly(tester);
+    });
+
+    testWidgets('sending a message sends stopTyping', (tester) async {
+      await seedConversationWithMessages();
+      await tester.pumpWidget(buildScreen());
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(ChatThreadScreen.composerFieldKey),
+        'new message',
+      );
+
+      await tester.tap(find.byKey(ChatThreadScreen.sendButtonKey));
+      await tester.pumpAndSettle();
+
+      expect(typingSocket.sent.last, ('stopTyping', conversationId));
+
+      await _disposeCleanly(tester);
+    });
+
+    testWidgets('leaving the chat sends stopTyping', (tester) async {
+      await seedConversationWithMessages();
+      await tester.pumpWidget(buildScreen());
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(ChatThreadScreen.composerFieldKey),
+        'h',
+      );
+
+      await _disposeCleanly(tester);
+
+      expect(typingSocket.sent.last, ('stopTyping', conversationId));
+    });
   });
 }
