@@ -1,0 +1,62 @@
+import { Server } from 'socket.io';
+
+import { createConnectionRegistry } from './registry.js';
+
+export const userRoom = (userId) => `user:${userId}`;
+export const conversationRoom = (conversationId) => `conversation:${conversationId}`;
+
+// The Socket.IO server, not yet attached to an HTTP server. Every socket is
+// authenticated at its handshake and joined to its rooms by the server;
+// clients can't join or leave rooms themselves (ADR 0005).
+export function createRealtime({ prisma, authenticate }) {
+  // The only client is the app, so no HTTP long-polling fallback.
+  const io = new Server({ transports: ['websocket'] });
+  const registry = createConnectionRegistry();
+
+  // Rejecting here refuses the connection outright, as a `connect_error`,
+  // rather than accepting it and booting it afterwards. The token is read
+  // from the auth payload only: a query string lands in access logs. Once
+  // accepted, a socket isn't re-checked when its token expires: revocation
+  // is to be pushed to it instead (ADR 0005).
+  io.use((socket, next) => {
+    // A failure (the database being down, say) must still answer the
+    // handshake, or the client waits until its connect timeout.
+    admit(socket).then(
+      (error) => next(error),
+      (err) => {
+        console.error(err);
+        next(new Error('server_error'));
+      },
+    );
+  });
+
+  // Readies an authenticated socket, or returns the error refusing it.
+  async function admit(socket) {
+    const token = socket.handshake.auth?.token;
+    const auth = typeof token === 'string' ? await authenticate(token) : null;
+    if (!auth) return new Error('unauthenticated');
+    // Looked up before the connection is accepted, so the socket is in all
+    // of its rooms by the time the client sees `connect`.
+    const participants = await prisma.participant.findMany({
+      where: { userId: auth.userId },
+      select: { conversationId: true },
+    });
+    socket.data = {
+      ...auth,
+      rooms: [
+        userRoom(auth.userId),
+        ...participants.map(({ conversationId }) => conversationRoom(conversationId)),
+      ],
+    };
+    return undefined;
+  }
+
+  io.on('connection', (socket) => {
+    const { userId, sessionId, rooms } = socket.data;
+    registry.register(socket.id, { userId, sessionId });
+    socket.join(rooms);
+    socket.on('disconnect', () => registry.unregister(socket.id));
+  });
+
+  return { io, registry };
+}

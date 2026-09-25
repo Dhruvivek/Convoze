@@ -3,12 +3,26 @@ import { Router } from 'express';
 import { DEFAULT_TOKEN_TTLS } from '../auth/tokenTtls.js';
 import { sendError } from '../http/errors.js';
 import { resetDatabase } from './resetDatabase.js';
+import { seedConversation } from './seedConversation.js';
+
+// The event the emit endpoint sends, which no feature listens for.
+export const E2E_TEST_EVENT = 'e2e:test';
 
 // Test-only endpoints, mounted only when E2E_MODE is on.
-export function createE2eRouter({ prisma, faults, refreshCounter, authenticated, tokenTtls }) {
+export function createE2eRouter({
+  prisma,
+  clock,
+  realtime,
+  faults,
+  refreshCounter,
+  authenticated,
+  tokenTtls,
+}) {
   const router = Router();
 
   router.post('/reset', async (_req, res) => {
+    // Sockets of the Users about to be deleted would otherwise stay open.
+    realtime.io.disconnectSockets(true);
     await resetDatabase(prisma);
     faults.clear();
     refreshCounter.clear();
@@ -62,6 +76,39 @@ export function createE2eRouter({ prisma, faults, refreshCounter, authenticated,
 
   router.get('/sessions/:sessionId/refresh-count', (req, res) => {
     res.json({ count: refreshCounter.count(req.params.sessionId) });
+  });
+
+  // Only the sockets that connect afterwards join its room, as with any
+  // Conversation created while its Participants are connected.
+  router.post('/conversations', async (req, res) => {
+    const conversation = await seedConversation(prisma, req.body ?? {}, clock.now());
+    if (!conversation) {
+      sendError(
+        res,
+        400,
+        'invalid_request',
+        'Expected { type: "direct" | "group", name?: string (groups only), participantPhoneNumbers: [2 for direct, 1+ for group] }',
+      );
+      return;
+    }
+    res.status(201).json(conversation);
+  });
+
+  // Sends `payload` as an `e2e:test` event to everyone in `room`, so room
+  // membership can be checked before any feature emits events.
+  router.post('/emit', (req, res) => {
+    const { room, payload = {} } = req.body ?? {};
+    if (typeof room !== 'string' || room.length === 0) {
+      sendError(res, 400, 'invalid_request', 'Expected { room, payload? }');
+      return;
+    }
+    realtime.io.to(room).emit(E2E_TEST_EVENT, payload);
+    res.status(204).end();
+  });
+
+  // How many live sockets the server holds for the Session.
+  router.get('/sessions/:sessionId/sockets', (req, res) => {
+    res.json({ count: realtime.registry.socketsForSession(req.params.sessionId).length });
   });
 
   // A protected route like any other, for exercising the real auth middleware.

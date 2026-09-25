@@ -1,3 +1,4 @@
+import { createServer } from 'node:http';
 import express from 'express';
 
 import { createAuthenticator, requireAuth } from './auth/authenticate.js';
@@ -8,10 +9,13 @@ import { createFaultInjector } from './e2e/faults.js';
 import { createRefreshCounter } from './e2e/refreshCounter.js';
 import { createE2eRouter } from './e2e/routes.js';
 import { errorHandler, notFoundHandler } from './http/errors.js';
+import { createRealtime } from './realtime/server.js';
 
-// Builds the Express app from its dependencies, so tests and production wire
-// different implementations (fake Verify client, controllable clock, ...).
-// Whoever needs to hear about revoked Sessions subscribes to `sessionRevoked`.
+// Builds the server from its dependencies, so tests and production wire
+// different implementations (fake Verify client, controllable clock, ...):
+// the Express `app`, and the `httpServer` that serves it with the realtime
+// Socket.IO server attached. Whoever needs to hear about revoked Sessions
+// subscribes to `sessionRevoked`.
 export function createApp({
   prisma,
   verifyClient,
@@ -24,7 +28,9 @@ export function createApp({
   app.disable('x-powered-by');
   app.use(express.json());
   const tokenTtls = createTokenTtls();
-  const authenticated = requireAuth(createAuthenticator({ prisma, jwtSecret, clock }));
+  const authenticate = createAuthenticator({ prisma, jwtSecret, clock });
+  const authenticated = requireAuth(authenticate);
+  const realtime = createRealtime({ prisma, authenticate });
 
   if (e2eMode) {
     const faults = createFaultInjector();
@@ -32,7 +38,15 @@ export function createApp({
     // The router goes first so a fault can never break the test-only endpoints.
     app.use(
       '/__e2e__',
-      createE2eRouter({ prisma, faults, refreshCounter, authenticated, tokenTtls }),
+      createE2eRouter({
+        prisma,
+        clock,
+        realtime,
+        faults,
+        refreshCounter,
+        authenticated,
+        tokenTtls,
+      }),
     );
     // Counted ahead of faults, so a refresh made to fail still counts.
     app.post('/auth/refresh', refreshCounter.middleware);
@@ -59,5 +73,8 @@ export function createApp({
 
   app.use(notFoundHandler);
   app.use(errorHandler);
-  return app;
+
+  const httpServer = createServer(app);
+  realtime.io.attach(httpServer);
+  return { app, httpServer, realtime };
 }

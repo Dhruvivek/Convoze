@@ -23,7 +23,7 @@ export function buildTestApp({ prisma, e2eMode = false } = {}) {
   const clock = createFakeClock();
   const verifyClient = createFakeVerifyClient({ code: TEST_OTP_CODE });
   const sessionRevoked = createSessionRevokedHook();
-  const app = createApp({
+  const { app, httpServer, realtime } = createApp({
     prisma,
     verifyClient,
     clock,
@@ -31,7 +31,7 @@ export function buildTestApp({ prisma, e2eMode = false } = {}) {
     sessionRevoked,
     e2eMode,
   });
-  return { app, clock, verifyClient, sessionRevoked };
+  return { app, httpServer, realtime, clock, verifyClient, sessionRevoked };
 }
 
 export { resetDatabase };

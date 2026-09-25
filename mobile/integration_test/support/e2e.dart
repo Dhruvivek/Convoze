@@ -86,6 +86,36 @@ class E2eBackend {
     return res.data!['count'] as int;
   }
 
+  /// Creates a Conversation between the Users with [phoneNumbers], creating
+  /// any that haven't signed in yet. Returns its id. Only sockets that connect
+  /// afterwards join its room.
+  Future<String> seedConversation(
+    List<String> phoneNumbers, {
+    String type = 'group',
+  }) async {
+    const path = '/__e2e__/conversations';
+    final res = await _call(
+      path,
+      () => _dio.post<Map<String, dynamic>>(
+        path,
+        data: {'type': type, 'participantPhoneNumbers': phoneNumbers},
+      ),
+    );
+    return res.data!['id'] as String;
+  }
+
+  /// Sends [payload] as an `e2e:test` event to every socket in [room]
+  /// (`conversation:<id>` or `user:<id>`).
+  Future<void> emitTestEvent(String room, Map<String, Object?> payload) =>
+      _post('/__e2e__/emit', data: {'room': room, 'payload': payload});
+
+  /// How many live sockets the server holds for [sessionId].
+  Future<int> socketCount(String sessionId) async {
+    final path = '/__e2e__/sessions/$sessionId/sockets';
+    final res = await _call(path, () => _dio.get<Map<String, dynamic>>(path));
+    return res.data!['count'] as int;
+  }
+
   Future<void> _post(String path, {Object? data}) =>
       _call<void>(path, () => _dio.post<void>(path, data: data));
 

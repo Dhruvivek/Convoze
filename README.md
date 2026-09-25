@@ -30,7 +30,7 @@ npm run dev              # http://localhost:3000
 
 Outside e2e mode the server sends real SMS codes through Twilio Verify, so it needs `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and `TWILIO_VERIFY_SERVICE_SID` (see `.env.example`), and refuses to start without them.
 
-**Backend tests** drive the real HTTP API with supertest against the Postgres database in `TEST_DATABASE_URL`, using a fake OTP verifier and a controllable clock. `npm test` applies migrations to that database first. The tests truncate it, so never point it at data you care about.
+**Backend tests** drive the real HTTP API with supertest, and the realtime Socket.IO server with real `socket.io-client` connections to a server on a random port, against the Postgres database in `TEST_DATABASE_URL`, using a fake OTP verifier and a controllable clock. `npm test` applies migrations to that database first. The tests truncate it, so never point it at data you care about.
 
 ```sh
 npm test
@@ -47,6 +47,7 @@ This sets `E2E_MODE=true`, which:
 - replaces Twilio Verify with a fake that accepts only `E2E_OTP_CODE` (default `000000`);
 - mounts test-only endpoints: `POST /__e2e__/reset` empties the database, and `POST /__e2e__/faults` with `{ method, path, count, status?, code? }` makes the next `count` calls to that endpoint fail with that status and error code (503 `fault_injected` by default; e.g. 502 `otp_provider_unavailable` stands in for an SMS provider outage).
 - mounts test-only auth endpoints: `POST /__e2e__/token-ttls` with `{ accessTokenSeconds?, refreshTokenSeconds? }` shortens token lifetimes until the next reset; `GET /__e2e__/echo` sits behind the real auth middleware and answers `{ userId, sessionId }`; `GET /__e2e__/sessions/:sessionId/refresh-count` answers `{ count }` of `POST /auth/refresh` calls made for that Session.
+- mounts test-only realtime endpoints: `POST /__e2e__/conversations` with `{ type: "direct" | "group", name?, participantPhoneNumbers }` seeds a Conversation, creating any Users that don't exist yet, and answers `{ id, type, participants: [{ userId, phoneNumber }] }` (only sockets that connect afterwards join its room); `POST /__e2e__/emit` with `{ room, payload? }` sends an `e2e:test` event to a room (`conversation:<id>` or `user:<id>`); `GET /__e2e__/sessions/:sessionId/sockets` answers `{ count }` of live sockets the server holds for that Session. `POST /__e2e__/reset` also closes every live socket.
 
 The server refuses to start in e2e mode when `NODE_ENV=production`.
 
@@ -59,7 +60,7 @@ cd mobile
 # iOS simulator
 flutter test integration_test
 # Android emulator (the emulator reaches the host at 10.0.2.2)
-flutter test integration_test --dart-define=API_BASE_URL=http://10.0.2.2:3000
+flutter test integration_test --dart-define=API_BASE_URL=http://10.0.2.2:3000 --dart-define=SOCKET_URL=http://10.0.2.2:3000
 ```
 
 Pick a device with `-d <device-id>` if more than one is connected.

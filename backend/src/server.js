@@ -18,7 +18,7 @@ const verifyClient = config.e2eMode
   ? createFakeVerifyClient({ code: config.e2eOtpCode })
   : createTwilioVerifyClient(config.twilio);
 
-const app = createApp({
+const { httpServer, realtime } = createApp({
   prisma,
   verifyClient,
   clock: systemClock,
@@ -26,13 +26,14 @@ const app = createApp({
   e2eMode: config.e2eMode,
 });
 
-const server = app.listen(config.port, () => {
+httpServer.listen(config.port, () => {
   const mode = config.e2eMode ? ' in E2E MODE (test-only endpoints, fake OTP verifier)' : '';
   console.log(`Convoze backend listening on port ${config.port}${mode}`);
 });
 
 async function shutdown() {
-  server.close();
+  // Closes the sockets and the HTTP server under them.
+  realtime.io.close();
   await prisma.$disconnect();
 }
 process.on('SIGTERM', shutdown);

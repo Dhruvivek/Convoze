@@ -4,9 +4,12 @@ import request from 'supertest';
 import { TEST_OTP_CODE } from './testApp.js';
 
 // Signs one Device in through the real API and returns the verify response.
-export async function signIn(app, { deviceId = '0199a1b2-0000-4000-8000-00000000000a' } = {}) {
+export async function signIn(
+  app,
+  { phoneNumber = '+14155550100', deviceId = '0199a1b2-0000-4000-8000-00000000000a' } = {},
+) {
   const res = await request(app).post('/auth/otp/verify').send({
-    phoneNumber: '+14155550100',
+    phoneNumber,
     code: TEST_OTP_CODE,
     deviceId,
     platform: 'android',
