@@ -8,10 +8,24 @@ export const conversationRoom = (conversationId) => `conversation:${conversation
 // The Socket.IO server, not yet attached to an HTTP server. Every socket is
 // authenticated at its handshake and joined to its rooms by the server;
 // clients can't join or leave rooms themselves (ADR 0005).
-export function createRealtime({ prisma, authenticate }) {
+export function createRealtime({ prisma, authenticate, sessionRevoked }) {
   // The only client is the app, so no HTTP long-polling fallback.
   const io = new Server({ transports: ['websocket'] });
   const registry = createConnectionRegistry();
+
+  // Revocation reaches open sockets immediately (ADR 0005, #33): logout,
+  // logout-others and refresh-token reuse detection all fire this hook.
+  // `disconnect(true)` is a server-initiated close, which the client sees
+  // (and its library doesn't retry) unlike a dropped transport. Normal
+  // disconnect handling then updates the registry.
+  sessionRevoked?.subscribe(({ sessionId }) => {
+    for (const socketId of registry.socketsForSession(sessionId)) {
+      const socket = io.sockets.sockets.get(socketId);
+      if (!socket) continue;
+      socket.emit('sessionRevoked', {});
+      socket.disconnect(true);
+    }
+  });
 
   // Rejecting here refuses the connection outright, as a `connect_error`,
   // rather than accepting it and booting it afterwards. The token is read

@@ -30,7 +30,7 @@ export function createApp({
   const tokenTtls = createTokenTtls();
   const authenticate = createAuthenticator({ prisma, jwtSecret, clock });
   const authenticated = requireAuth(authenticate);
-  const realtime = createRealtime({ prisma, authenticate });
+  const realtime = createRealtime({ prisma, authenticate, sessionRevoked });
 
   if (e2eMode) {
     const faults = createFaultInjector();
