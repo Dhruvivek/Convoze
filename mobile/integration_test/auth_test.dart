@@ -11,15 +11,36 @@ Future<void> _sendCode(WidgetTester tester, String number) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> _signIn(WidgetTester tester) async {
+  await _sendCode(tester, '415 555 0100');
+  await tester.enterText(find.byKey(OtpEntryScreen.codeFieldKey), e2eOtpCode);
+  await tester.tap(find.text('Verify'));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   setUpE2e();
 
-  testWidgets('an unauthenticated launch lands on the login screen', (
+  testWidgets('a launch with empty storage lands on the login screen', (
     tester,
   ) async {
     await launchApp(tester);
 
     expect(find.text('Sign in'), findsOneWidget);
+  });
+
+  testWidgets('a restart after signing in goes straight to conversations', (
+    tester,
+  ) async {
+    await launchApp(tester);
+    await _signIn(tester);
+    expect(find.text('Conversations'), findsOneWidget);
+
+    await launchAppUntil(
+      tester,
+      find.text('Conversations'),
+      mustNotShow: find.text('Sign in'),
+    );
   });
 
   testWidgets('signing in with phone and code lands on conversations', (

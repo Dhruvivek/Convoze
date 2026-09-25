@@ -46,7 +46,7 @@ final class AuthStateProvider extends $NotifierProvider<AuthState, AuthStatus> {
   }
 }
 
-String _$authStateHash() => r'7d52c40d6146034a53698423c2ce22fd5d4fbba6';
+String _$authStateHash() => r'efbd7c94021e039d8dc3eb066ea90aff5395c0a8';
 
 /// The one source of truth for whether the app is signed in; the router
 /// gates screens on it.

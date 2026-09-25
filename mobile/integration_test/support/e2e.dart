@@ -1,6 +1,7 @@
 import 'package:convoze/app.dart';
 import 'package:convoze/core/config/app_config.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -80,8 +81,35 @@ void setUpE2e() {
   });
 }
 
-/// Launches the app as a cold start: a fresh ProviderScope and ConvozeApp.
+/// Launches the app as a cold start: a fresh ProviderScope and ConvozeApp
+/// over whatever is in device storage. Calling it again restarts the app.
 Future<void> launchApp(WidgetTester tester) async {
-  await tester.pumpWidget(const ProviderScope(child: ConvozeApp()));
+  await _coldStart(tester);
   await tester.pumpAndSettle();
 }
+
+/// Cold-starts the app like [launchApp], then pumps frame by frame until
+/// [target] shows, failing if [mustNotShow] shows on any frame along the way.
+Future<void> launchAppUntil(
+  WidgetTester tester,
+  Finder target, {
+  required Finder mustNotShow,
+  Duration timeout = const Duration(seconds: 10),
+}) async {
+  await _coldStart(tester);
+  final deadline = DateTime.now().add(timeout);
+  while (target.evaluate().isEmpty) {
+    expect(mustNotShow, findsNothing);
+    if (DateTime.now().isAfter(deadline)) {
+      fail('$target did not show within $timeout');
+    }
+    await tester.pump(const Duration(milliseconds: 16));
+  }
+  expect(mustNotShow, findsNothing);
+}
+
+// The unique key makes a restart replace the old ProviderScope rather than
+// reuse it.
+Future<void> _coldStart(WidgetTester tester) => tester.pumpWidget(
+  ProviderScope(key: UniqueKey(), child: const ConvozeApp()),
+);

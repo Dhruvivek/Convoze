@@ -6,6 +6,7 @@ import '../../features/auth/presentation/auth_state.dart';
 import '../../features/auth/presentation/otp_entry_screen.dart';
 import '../../features/auth/presentation/phone_entry_screen.dart';
 import '../../features/conversations/presentation/conversations_screen.dart';
+import 'splash_screen.dart';
 
 part 'app_router.g.dart';
 
@@ -24,15 +25,22 @@ GoRouter router(Ref ref) {
     initialLocation: '/',
     refreshListenable: refreshListenable,
     redirect: (context, state) {
-      final isAuthenticated = ref.read(authStateProvider) is Authenticated;
+      final location = state.matchedLocation;
+      final atSplash = location == '/splash';
       // Everything under /login is the unauthenticated area.
-      final isLoggingIn = state.matchedLocation.startsWith('/login');
+      final atLogin = location.startsWith('/login');
 
-      if (!isAuthenticated && !isLoggingIn) return '/login';
-      if (isAuthenticated && isLoggingIn) return '/';
-      return null;
+      return switch (ref.read(authStateProvider)) {
+        Restoring() => atSplash ? null : '/splash',
+        Unauthenticated() => atLogin ? null : '/login',
+        Authenticated() => atSplash || atLogin ? '/' : null,
+      };
     },
     routes: [
+      GoRoute(
+        path: '/splash',
+        builder: (context, state) => const SplashScreen(),
+      ),
       GoRoute(
         path: '/login',
         builder: (context, state) => const PhoneEntryScreen(),

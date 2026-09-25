@@ -14,6 +14,7 @@ class ConversationsScreen extends ConsumerWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
+            tooltip: 'Sign out',
             onPressed: () => ref.read(authStateProvider.notifier).signOut(),
           ),
         ],
