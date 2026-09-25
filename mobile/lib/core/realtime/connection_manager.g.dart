@@ -58,4 +58,51 @@ final class ConnectionManagerProvider
   }
 }
 
-String _$connectionManagerHash() => r'2726001cfe00bc9d1d3a87c0e6b81c4674b9ba10';
+String _$connectionManagerHash() => r'0fbc3038995b25493fa01492d84ce071d31ac857';
+
+/// The current status, then every change, for widgets like the "Connecting…"
+/// banner to watch.
+
+@ProviderFor(connectionStatus)
+final connectionStatusProvider = ConnectionStatusProvider._();
+
+/// The current status, then every change, for widgets like the "Connecting…"
+/// banner to watch.
+
+final class ConnectionStatusProvider
+    extends
+        $FunctionalProvider<
+          AsyncValue<ConnectionStatus>,
+          ConnectionStatus,
+          Stream<ConnectionStatus>
+        >
+    with $FutureModifier<ConnectionStatus>, $StreamProvider<ConnectionStatus> {
+  /// The current status, then every change, for widgets like the "Connecting…"
+  /// banner to watch.
+  ConnectionStatusProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'connectionStatusProvider',
+        isAutoDispose: false,
+        dependencies: null,
+        $allTransitiveDependencies: null,
+      );
+
+  @override
+  String debugGetCreateSourceHash() => _$connectionStatusHash();
+
+  @$internal
+  @override
+  $StreamProviderElement<ConnectionStatus> $createElement(
+    $ProviderPointer pointer,
+  ) => $StreamProviderElement(pointer);
+
+  @override
+  Stream<ConnectionStatus> create(Ref ref) {
+    return connectionStatus(ref);
+  }
+}
+
+String _$connectionStatusHash() => r'c6d5803b677a976f203bd66aa34edd9354a6c268';

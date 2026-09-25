@@ -261,4 +261,28 @@ describe('e2e live-connection endpoints', () => {
 
     assert.equal(await disconnected, 'io server disconnect');
   });
+
+  it("drops a Session's sockets without a server-initiated disconnect", async () => {
+    server = await startTestServer({ prisma, e2eMode: true });
+    const { accessToken } = await signIn(server.app);
+    const { sessionId } = jwt.decode(accessToken);
+    const socket = await connect(server.client({ auth: { token: accessToken } }));
+
+    const disconnected = nextEvent(socket, 'disconnect');
+    const res = await request(server.app).post(`/__e2e__/sessions/${sessionId}/drop-transport`);
+
+    assert.equal(res.status, 204);
+    // Not 'io server disconnect': the client sees this the way it sees a
+    // dropped network, so its own reconnection logic decides to retry.
+    assert.notEqual(await disconnected, 'io server disconnect');
+    await waitFor(async () => (await socketCount(sessionId)).body.count === 0);
+  });
+
+  it('is a no-op for a Session with no live sockets', async () => {
+    server = await startTestServer({ prisma, e2eMode: true });
+
+    const res = await request(server.app).post('/__e2e__/sessions/none/drop-transport');
+
+    assert.equal(res.status, 204);
+  });
 });

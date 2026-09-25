@@ -2,11 +2,14 @@ import 'dart:convert';
 
 import 'package:convoze/app.dart';
 import 'package:convoze/core/models/user.dart';
+import 'package:convoze/core/realtime/socket_factory.dart';
 import 'package:convoze/features/auth/data/auth_failure.dart';
 import 'package:convoze/features/auth/data/auth_repository.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../../../support/fake_socket_factory.dart';
 
 class _FakeAuthRepository implements AuthRepository {
   int logouts = 0;
@@ -48,7 +51,10 @@ Future<_FakeAuthRepository> _launchSignedIn(
   final repository = _FakeAuthRepository();
   await tester.pumpWidget(
     ProviderScope(
-      overrides: [authRepositoryProvider.overrideWithValue(repository)],
+      overrides: [
+        authRepositoryProvider.overrideWithValue(repository),
+        socketFactoryProvider.overrideWithValue(fakeSocketFactory()),
+      ],
       child: const ConvozeApp(),
     ),
   );

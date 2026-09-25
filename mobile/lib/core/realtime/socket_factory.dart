@@ -19,5 +19,12 @@ SocketFactory socketFactory(Ref ref) =>
           .disableAutoConnect()
           // A socket per sign-in, never one reused from a previous Session.
           .enableForceNew()
+          // Tuned rather than left at defaults (ADR 0005): short initial
+          // delay, a 30s cap, randomised to avoid a thundering herd of
+          // reconnects after a server restart, and unlimited attempts.
+          .setReconnectionDelay(1000)
+          .setReconnectionDelayMax(30000)
+          .setRandomizationFactor(0.5)
+          .setReconnectionAttempts(double.infinity)
           .build(),
     );

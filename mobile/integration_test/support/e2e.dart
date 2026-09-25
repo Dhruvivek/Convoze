@@ -116,6 +116,12 @@ class E2eBackend {
     return res.data!['count'] as int;
   }
 
+  /// Drops the transport under every live socket for [sessionId] without a
+  /// server-initiated disconnect, simulating a network drop so the client's
+  /// own reconnect logic runs.
+  Future<void> dropTransport(String sessionId) =>
+      _post('/__e2e__/sessions/$sessionId/drop-transport');
+
   Future<void> _post(String path, {Object? data}) =>
       _call<void>(path, () => _dio.post<void>(path, data: data));
 

@@ -1,10 +1,12 @@
 import 'package:convoze/app.dart';
+import 'package:convoze/core/realtime/socket_factory.dart';
 import 'package:convoze/core/router/splash_screen.dart';
 import 'package:convoze/core/storage/token_store.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../../support/fake_socket_factory.dart';
 import '../../support/gated_token_store.dart';
 
 /// Cold-starts the real app over a gated TokenStore and shows its first frame.
@@ -12,7 +14,10 @@ Future<GatedTokenStore> _launch(WidgetTester tester) async {
   final tokenStore = GatedTokenStore();
   await tester.pumpWidget(
     ProviderScope(
-      overrides: [tokenStoreProvider.overrideWithValue(tokenStore)],
+      overrides: [
+        tokenStoreProvider.overrideWithValue(tokenStore),
+        socketFactoryProvider.overrideWithValue(fakeSocketFactory()),
+      ],
       child: const ConvozeApp(),
     ),
   );
