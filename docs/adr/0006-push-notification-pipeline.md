@@ -1,6 +1,6 @@
 # Push notification pipeline
 
-**Status:** accepted — amended by [ADR 0008](0008-message-delivery-pipeline-update-log-and-sync-cursor.md) (push on disconnect with unacked messages)
+**Status:** accepted — amended by [ADR 0008](0008-message-delivery-pipeline-update-log-and-sync-cursor.md) (push on disconnect with unacked messages); amended by [ADR 0009](0009-local-first-client-data-layer.md) (no push for muted conversations)
 
 ## Context
 

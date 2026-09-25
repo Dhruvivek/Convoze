@@ -39,3 +39,15 @@ _Avoid_: queue (implies entries are removed once delivered — Update log entrie
 **Sync cursor**:
 The highest Update log position a Device has durably applied locally. Held by the Device, not the server, and presented on every (re)connect to resume from.
 _Avoid_: offset, pts, since-token
+
+**Local replica**:
+A Device's on-device copy of the User's conversations, messages and related data, which is the only thing the Device's UI reads from. Network traffic writes into it; screens never read from the network directly. Disposable: everything in it except the Outbox can be rebuilt from the server, so wiping it (at logout, on corruption, on a schema change) is always safe.
+_Avoid_: cache (implies an optional speed-up the UI can bypass), local DB (names the storage, not the role)
+
+**Outbox**:
+The messages a User has composed on a Device that the server hasn't yet acknowledged, including ones the server rejected, which stay (as failed) until the User retries or deletes them. The one part of the Local replica the server can't rebuild, so losing it loses the User's words.
+_Avoid_: pending queue, drafts (a draft is unsent text still in the composer, not a message the User has already sent)
+
+**Conversation preferences**:
+A Participant's own settings for how a Conversation appears and notifies for them — pinned, archived, muted, hidden, and how much of its history they have cleared — visible only to that User and synced across their Devices. Never seen by other Participants, unlike watermarks.
+_Avoid_: chat settings (ambiguous with group settings every Participant sees, like the group name), chat list controls (names the UI, not the state)

@@ -1,6 +1,6 @@
 # Postgres schema & ORM
 
-**Status:** accepted — amended by [ADR 0008](0008-message-delivery-pipeline-update-log-and-sync-cursor.md) (delivered state reinstated as a Delivery watermark)
+**Status:** accepted — amended by [ADR 0008](0008-message-delivery-pipeline-update-log-and-sync-cursor.md) (delivered state reinstated as a Delivery watermark); amended by [ADR 0009](0009-local-first-client-data-layer.md) (Conversation preferences columns on `Participant`)
 
 ## Context
 

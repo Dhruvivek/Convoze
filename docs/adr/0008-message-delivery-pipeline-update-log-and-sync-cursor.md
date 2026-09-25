@@ -1,6 +1,6 @@
 # Message delivery pipeline: per-user Update log & Sync cursor
 
-**Status:** accepted
+**Status:** accepted — amended by [ADR 0009](0009-local-first-client-data-layer.md) (shallow snapshot; `users` side-list on batches and pages; `conversation.prefs` Update kind; hydration carries the caller's `unreadCount`; conversations the user has left stay in the conversation list)
 
 ## Context
 

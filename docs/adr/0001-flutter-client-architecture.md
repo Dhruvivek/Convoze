@@ -1,6 +1,6 @@
 # Flutter client core architecture
 
-**Status:** accepted
+**Status:** accepted — amended by [ADR 0009](0009-local-first-client-data-layer.md) (`lib/core/db/` + `lib/core/sync/` hold the Local replica and sync engine)
 
 ## Context
 

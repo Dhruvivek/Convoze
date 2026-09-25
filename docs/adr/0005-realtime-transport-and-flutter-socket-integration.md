@@ -1,6 +1,6 @@
 # Realtime transport & Flutter-socket integration
 
-**Status:** accepted — amended by [ADR 0008](0008-message-delivery-pipeline-update-log-and-sync-cursor.md) (rooms no longer carry messages; one socket per Session in steady state)
+**Status:** accepted — amended by [ADR 0008](0008-message-delivery-pipeline-update-log-and-sync-cursor.md) (rooms no longer carry messages; one socket per Session in steady state); amended by [ADR 0009](0009-local-first-client-data-layer.md) (background disconnect waits up to ~20s for the Outbox to drain; the sync engine in `lib/core/sync/` owns `sync:*` and send events)
 
 ## Context
 
