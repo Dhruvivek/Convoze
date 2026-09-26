@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/theme/app_spacing.dart';
+import '../../../core/widgets/auth_scaffold.dart';
+import '../../../core/widgets/loading_filled_button.dart';
 import 'auth_failure_message.dart';
 import 'auth_state.dart';
 
@@ -36,6 +39,10 @@ class _PhoneEntryScreenState extends ConsumerState<PhoneEntryScreen> {
       setState(() => _error = 'Enter your country code and phone number');
       return;
     }
+    if (number.length < 7) {
+      setState(() => _error = "That doesn't look like a complete phone number.");
+      return;
+    }
     // The backend normalises to E.164; it only needs the +country code.
     final phoneNumber = '+$countryCode$number';
 
@@ -55,63 +62,55 @@ class _PhoneEntryScreenState extends ConsumerState<PhoneEntryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Sign in')),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    return AuthScaffold(
+      title: 'Sign in',
+      headline: "What's your number?",
+      children: [
+        Text(
+          "We'll text you a code to sign in — no password to remember.",
+          style: Theme.of(context).textTheme.bodyLarge,
+        ),
+        const SizedBox(height: AppSpacing.xl),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("Enter your phone number and we'll text you a code."),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                SizedBox(
-                  width: 88,
-                  child: TextField(
-                    key: PhoneEntryScreen.countryCodeFieldKey,
-                    controller: _countryCode,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly,
-                      LengthLimitingTextInputFormatter(3),
-                    ],
-                    decoration: const InputDecoration(
-                      labelText: 'Code',
-                      prefixText: '+',
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    key: PhoneEntryScreen.numberFieldKey,
-                    controller: _number,
-                    keyboardType: TextInputType.phone,
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Phone number',
-                    ),
-                    onSubmitted: (_) => _sendCode(),
-                  ),
-                ),
-              ],
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+            SizedBox(
+              width: 88,
+              child: TextField(
+                key: PhoneEntryScreen.countryCodeFieldKey,
+                controller: _countryCode,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(3),
+                ],
+                decoration: const InputDecoration(labelText: 'Code', prefixText: '+'),
               ),
-            ],
-            const SizedBox(height: 24),
-            FilledButton(
-              onPressed: _sending ? null : _sendCode,
-              child: const Text('Send code'),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: TextField(
+                key: PhoneEntryScreen.numberFieldKey,
+                controller: _number,
+                keyboardType: TextInputType.phone,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: 'Phone number'),
+                onSubmitted: (_) => _sendCode(),
+              ),
             ),
           ],
         ),
-      ),
+        if (_error != null) ...[
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            _error!,
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(color: Theme.of(context).colorScheme.error),
+          ),
+        ],
+        const SizedBox(height: AppSpacing.xl),
+        LoadingFilledButton(label: 'Send code', loading: _sending, onPressed: _sendCode),
+      ],
     );
   }
 }

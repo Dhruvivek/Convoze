@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/chat_message_view.dart';
+import 'media_viewer.dart';
 
 /// The chat screen's message list (#53/#55): a reversed [ListView] of
 /// day-separated [ChatMessageView]s, with a "beginning of conversation"
@@ -13,6 +14,7 @@ class MessageList extends StatelessWidget {
     required this.isLoadingOlder,
     required this.reachedStart,
     this.onTapFailed,
+    this.onLongPress,
   });
 
   final List<ChatMessageView> views;
@@ -23,6 +25,9 @@ class MessageList extends StatelessWidget {
   /// Called with a failed Outbox row's `clientMsgId` when its bubble is
   /// tapped ("failed — tap to retry or delete", ADR 0009).
   final void Function(String clientMsgId)? onTapFailed;
+
+  /// Called on a bubble long-press, e.g. to open `showMessageActions` (#56).
+  final void Function(ChatMessageView view)? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -48,7 +53,11 @@ class MessageList extends StatelessWidget {
         final row = rows[rows.length - 1 - index];
         return switch (row) {
           _DateRow(:final day) => _DateSeparator(day: day),
-          _MessageRow(:final view) => _MessageBubble(view: view, onTapFailed: onTapFailed),
+          _MessageRow(:final view) => _MessageBubble(
+            view: view,
+            onTapFailed: onTapFailed,
+            onLongPress: onLongPress == null ? null : () => onLongPress!(view),
+          ),
         };
       },
     );
@@ -177,10 +186,11 @@ String _timeLabel(DateTime utc) {
 }
 
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.view, this.onTapFailed});
+  const _MessageBubble({required this.view, this.onTapFailed, this.onLongPress});
 
   final ChatMessageView view;
   final void Function(String clientMsgId)? onTapFailed;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -197,9 +207,12 @@ class _MessageBubble extends StatelessWidget {
           onTap: failed && view.clientMsgId != null
               ? () => onTapFailed?.call(view.clientMsgId!)
               : null,
+          onLongPress: view.isDeleted ? null : onLongPress,
           child: Container(
             margin: const EdgeInsets.symmetric(vertical: 2),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: view.isImage && !view.isDeleted
+                ? const EdgeInsets.all(4)
+                : const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: view.isDeleted
                   ? scheme.surfaceContainerHighest.withValues(alpha: 0.5)
@@ -212,19 +225,33 @@ class _MessageBubble extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  view.isDeleted
-                      ? 'This message was deleted'
-                      : (view.content ?? ''),
-                  style: TextStyle(
-                    color: view.isDeleted
-                        ? scheme.onSurfaceVariant
-                        : mine
-                        ? scheme.onPrimary
-                        : scheme.onSurfaceVariant,
-                    fontStyle: view.isDeleted ? FontStyle.italic : FontStyle.normal,
+                if (view.isDeleted)
+                  Text(
+                    'This message was deleted',
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  )
+                else if (view.isImage)
+                  _ImageContent(view: view, mine: mine)
+                else if (view.isFile)
+                  _FileContent(view: view, mine: mine)
+                else ...[
+                  Text(
+                    view.content ?? '',
+                    style: TextStyle(color: mine ? scheme.onPrimary : scheme.onSurfaceVariant),
                   ),
-                ),
+                  if (view.editedAt != null)
+                    Text(
+                      '(edited)',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: (mine ? scheme.onPrimary : scheme.onSurfaceVariant)
+                            .withValues(alpha: 0.65),
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                ],
                 const SizedBox(height: 2),
                 Row(
                   mainAxisSize: MainAxisSize.min,
@@ -260,6 +287,95 @@ class _MessageBubble extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _ImageContent extends StatelessWidget {
+  const _ImageContent({required this.view, required this.mine});
+
+  final ChatMessageView view;
+  final bool mine;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final foreground = mine ? scheme.onPrimary : scheme.onSurfaceVariant;
+    final url = view.mediaThumbnailUrl ?? view.mediaUrl;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: GestureDetector(
+            onTap: view.mediaUrl == null
+                ? null
+                : () => showMediaViewer(context, url: view.mediaUrl!),
+            child: AspectRatio(
+              aspectRatio: (view.mediaWidth != null && view.mediaHeight != null)
+                  ? view.mediaWidth! / view.mediaHeight!
+                  : 1,
+              child: url == null
+                  ? Container(color: Colors.black12, child: const Icon(Icons.image_outlined))
+                  : Image.network(
+                      url,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) =>
+                          const Icon(Icons.broken_image_outlined),
+                    ),
+            ),
+          ),
+        ),
+        if ((view.content ?? '').isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+            child: Text(view.content!, style: TextStyle(color: foreground)),
+          ),
+      ],
+    );
+  }
+}
+
+class _FileContent extends StatelessWidget {
+  const _FileContent({required this.view, required this.mine});
+
+  final ChatMessageView view;
+  final bool mine;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final foreground = mine ? scheme.onPrimary : scheme.onSurfaceVariant;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.insert_drive_file_outlined, color: foreground),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                view.mediaFileName ?? 'Document',
+                style: TextStyle(color: foreground, fontWeight: FontWeight.w600),
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (view.mediaBytes != null)
+                Text(
+                  _humanSize(view.mediaBytes!),
+                  style: TextStyle(color: foreground.withValues(alpha: 0.7), fontSize: 12),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _humanSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 }
 

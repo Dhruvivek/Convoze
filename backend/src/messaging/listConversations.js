@@ -51,6 +51,8 @@ export async function listConversations(prisma, userId, { cursor, limit = DEFAUL
     ) {
       continue;
     }
+    // Deleted (#45): hidden only from the Participant who deleted it.
+    if (participant.hiddenAt !== null) continue;
     rows.push({
       activityKey: lastMessage ? lastMessage.id : conversation.id,
       conversation,
@@ -72,13 +74,22 @@ export async function listConversations(prisma, userId, { cursor, limit = DEFAUL
   );
   const conversations = page.map(({ conversation, participant, lastMessage, members }, index) => {
     for (const member of members) referencedUserIds.add(member.userId);
-    if (lastMessage && !lastMessage.isDeleted) referencedUserIds.add(lastMessage.senderId);
+    // A cleared Message (#45) never shows as this caller's `lastMessage`,
+    // even though it's still the Conversation's real last activity for
+    // pagination (`activityKey`, computed above from the raw `lastMessage`).
+    const visibleLastMessage =
+      lastMessage && (!participant.historyClearedMessageId || lastMessage.id > participant.historyClearedMessageId)
+        ? lastMessage
+        : null;
+    if (visibleLastMessage && !visibleLastMessage.isDeleted) {
+      referencedUserIds.add(visibleLastMessage.senderId);
+    }
     return {
       id: conversation.id,
       type: conversation.type,
       name: conversation.name,
       participants: members.map((m) => ({ userId: m.userId, role: m.role })),
-      lastMessage: lastMessage ? messagePayload(lastMessage) : null,
+      lastMessage: visibleLastMessage ? messagePayload(visibleLastMessage) : null,
       unreadCount: unreadCounts[index],
       readWatermarks: members.map((m) => ({ userId: m.userId, messageId: m.lastReadMessageId })),
       deliveryWatermarks: members.map((m) => ({
@@ -86,6 +97,10 @@ export async function listConversations(prisma, userId, { cursor, limit = DEFAUL
         messageId: m.lastDeliveredMessageId,
       })),
       left: participant.leftAt !== null,
+      pinnedAt: participant.pinnedAt,
+      archivedAt: participant.archivedAt,
+      mutedUntil: participant.mutedUntil,
+      hiddenAt: participant.hiddenAt,
     };
   });
 

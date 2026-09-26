@@ -14,8 +14,21 @@ import '../../../core/realtime/connection_manager.dart';
 import '../../../core/storage/token_store.dart';
 import '../../../core/sync/sync_engine.dart';
 import '../../../core/sync/wire.dart';
+import 'media_repository.dart';
+import 'message_action_failure.dart';
 
 part 'messages_repository.g.dart';
+
+/// A photo or a document — the two kinds #40's tracer bullet sends (video is
+/// out of scope).
+enum MediaKind {
+  image('image'),
+  file('file');
+
+  const MediaKind(this.wireName);
+
+  final String wireName;
+}
 
 /// The outcome of fetching one page of older history (#55).
 class LoadOlderResult {
@@ -31,6 +44,9 @@ class LoadOlderResult {
 /// The chat screen's data layer (#53/#55): sending, marking read, and
 /// paging history, all against the Local replica (`CONTEXT.md`) — the
 /// screen itself never touches the socket or REST directly.
+/// `editMessage`/`deleteMessage` (#56) are the one exception: there's no
+/// offline case to resume, only one to refuse (see `ensureConnected`), so
+/// they go straight over the socket instead of through the Outbox.
 class MessagesRepository {
   MessagesRepository({
     required this.db,
@@ -117,6 +133,66 @@ class MessagesRepository {
           ),
         );
     _kickDrainIfConnected();
+  }
+
+  /// Queues a photo or document [upload] in the Outbox (#40's reduced
+  /// photos+documents-only pass), the same "shows at once, drains when
+  /// connected" path as [send]. [caption] becomes the row's `content`;
+  /// [fileName] is only meaningful for [MediaKind.file].
+  Future<void> sendMedia(
+    String conversationId, {
+    required MediaKind kind,
+    required CloudinaryUploadResult upload,
+    String? caption,
+    String? fileName,
+  }) async {
+    await db
+        .into(db.outbox)
+        .insert(
+          OutboxCompanion.insert(
+            clientMsgId: const Uuid().v4(),
+            conversationId: conversationId,
+            content: caption?.trim() ?? '',
+            type: Value(kind.wireName),
+            media: Value(jsonEncode(upload.toJson(fileName: fileName))),
+            createdAt: DateTime.now().toUtc(),
+          ),
+        );
+    _kickDrainIfConnected();
+  }
+
+  /// Edits [messageId] (the sender's own, still-plain-text Message) via a
+  /// direct `message:edit` ack (#56). The local replica isn't touched here;
+  /// the `message.edited` Update this fans out echoes back and applies
+  /// through the usual sync path, sender included.
+  Future<void> editMessage(String messageId, String content) async {
+    final response = await _emitForAck(
+      'message:edit',
+      {'messageId': messageId, 'content': content.trim()},
+    );
+    if (response['ok'] != true) {
+      throw MessageActionFailure.fromCode(response['code'] as String?);
+    }
+  }
+
+  /// Deletes [messageId] (the sender's own Message) via a direct
+  /// `message:delete` ack (#56) — see [editMessage].
+  Future<void> deleteMessage(String messageId) async {
+    final response = await _emitForAck('message:delete', {'messageId': messageId});
+    if (response['ok'] != true) {
+      throw MessageActionFailure.fromCode(response['code'] as String?);
+    }
+  }
+
+  Future<Map<String, dynamic>> _emitForAck(String event, Map<String, dynamic> data) async {
+    final socket = currentSocket();
+    if (socket == null) throw const MessageActionNetworkFailure();
+    try {
+      final response = await socket.timeout(15000).emitWithAckAsync(event, data);
+      return (response as Map).cast<String, dynamic>();
+    } catch (_) {
+      throw const MessageActionNetworkFailure();
+    }
   }
 
   /// Puts a `failed` Outbox row ("failed — tap to retry or delete", ADR

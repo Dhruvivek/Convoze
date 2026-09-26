@@ -4,12 +4,15 @@ import 'dart:convert';
 import 'package:convoze/core/db/database.dart';
 import 'package:convoze/core/storage/token_store.dart';
 import 'package:convoze/core/sync/sync_engine.dart';
+import 'package:convoze/features/conversations/data/media_repository.dart';
+import 'package:convoze/features/conversations/data/message_action_failure.dart';
 import 'package:convoze/features/conversations/data/messages_repository.dart';
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import '../../../support/fake_ack_socket.dart';
 
@@ -74,6 +77,14 @@ void main() {
   late SyncEngine engine;
   late MessagesRepository repo;
 
+  MessagesRepository repoWithSocket(io.Socket? Function() currentSocket) => MessagesRepository(
+    db: db,
+    dio: dio,
+    tokenStore: TokenStore(const FlutterSecureStorage()),
+    syncEngine: engine,
+    currentSocket: currentSocket,
+  );
+
   setUp(() async {
     FlutterSecureStorage.setMockInitialValues({
       'user': '{"id":"$me","phoneNumber":"+14155550100","displayName":"Me"}',
@@ -84,13 +95,7 @@ void main() {
       ..httpClientAdapter = backend;
     final tokenStore = TokenStore(const FlutterSecureStorage());
     engine = SyncEngine(db: db, dio: dio, tokenStore: tokenStore);
-    repo = MessagesRepository(
-      db: db,
-      dio: dio,
-      tokenStore: tokenStore,
-      syncEngine: engine,
-      currentSocket: () => null,
-    );
+    repo = repoWithSocket(() => null);
     await db
         .into(db.conversations)
         .insert(ConversationsCompanion.insert(id: 'conv-1', type: 'direct', unreadCount: const Value(3)));
@@ -131,19 +136,145 @@ void main() {
 
     test('kicks an immediate drain when a socket is live', () async {
       final socket = FakeAckSocket({'ok': true, 'messageId': 'm1'});
-      final onlineRepo = MessagesRepository(
-        db: db,
-        dio: dio,
-        tokenStore: TokenStore(const FlutterSecureStorage()),
-        syncEngine: engine,
-        currentSocket: () => socket,
-      );
+      final onlineRepo = repoWithSocket(() => socket);
 
       await onlineRepo.send('conv-1', 'hello');
       await pumpEventQueue();
 
       expect(socket.sentEvents, ['message:send']);
       expect(await db.select(db.outbox).get(), isEmpty);
+    });
+  });
+
+  group('sendMedia', () {
+    test('inserts an Outbox row carrying the encoded upload reference', () async {
+      const upload = CloudinaryUploadResult(
+        publicId: 'u/me-1/abc',
+        version: '123',
+        signature: 'sig',
+        resourceType: 'image',
+        bytes: 2048,
+        format: 'jpg',
+        width: 800,
+        height: 600,
+      );
+
+      await repo.sendMedia(
+        'conv-1',
+        kind: MediaKind.image,
+        upload: upload,
+        caption: 'nice view',
+      );
+
+      final row = await db.select(db.outbox).getSingle();
+      expect(row.type, 'image');
+      expect(row.content, 'nice view');
+      final media = jsonDecode(row.media!) as Map<String, dynamic>;
+      expect(media['publicId'], 'u/me-1/abc');
+      expect(media['resourceType'], 'image');
+      expect(media['width'], 800);
+    });
+
+    test('a file message carries its file name', () async {
+      const upload = CloudinaryUploadResult(
+        publicId: 'u/me-1/doc',
+        version: '1',
+        signature: 'sig',
+        resourceType: 'raw',
+        bytes: 4096,
+        format: 'pdf',
+      );
+
+      await repo.sendMedia(
+        'conv-1',
+        kind: MediaKind.file,
+        upload: upload,
+        fileName: 'invoice.pdf',
+      );
+
+      final row = await db.select(db.outbox).getSingle();
+      final media = jsonDecode(row.media!) as Map<String, dynamic>;
+      expect(media['fileName'], 'invoice.pdf');
+    });
+
+    test('kicks an immediate drain when a socket is live', () async {
+      const upload = CloudinaryUploadResult(
+        publicId: 'u/me-1/abc',
+        version: '123',
+        signature: 'sig',
+        resourceType: 'image',
+        bytes: 2048,
+        format: 'jpg',
+      );
+      final socket = FakeAckSocket({'ok': true, 'messageId': 'm1'});
+      final onlineRepo = repoWithSocket(() => socket);
+
+      await onlineRepo.sendMedia('conv-1', kind: MediaKind.image, upload: upload);
+      await pumpEventQueue();
+
+      expect(socket.sentEvents, ['message:send']);
+      expect(await db.select(db.outbox).get(), isEmpty);
+    });
+  });
+
+  group('editMessage', () {
+    test('sends the trimmed content over message:edit', () async {
+      final socket = FakeAckSocket({'ok': true});
+      final onlineRepo = repoWithSocket(() => socket);
+
+      await onlineRepo.editMessage('msg-1', '  hi  ');
+
+      expect(socket.sentEvents, ['message:edit']);
+      expect(socket.sentPayloads.single, {'messageId': 'msg-1', 'content': 'hi'});
+    });
+
+    test('throws the failure the ack names when it refuses', () async {
+      final socket = FakeAckSocket({'ok': false, 'code': 'FORBIDDEN'});
+      final onlineRepo = repoWithSocket(() => socket);
+
+      expect(
+        () => onlineRepo.editMessage('msg-1', 'hi'),
+        throwsA(isA<MessageActionForbidden>()),
+      );
+    });
+
+    test('throws MessageActionNetworkFailure when the ack never lands', () async {
+      final socket = TimingOutSocket();
+      final onlineRepo = repoWithSocket(() => socket);
+
+      expect(
+        () => onlineRepo.editMessage('msg-1', 'hi'),
+        throwsA(isA<MessageActionNetworkFailure>()),
+      );
+    });
+
+    test('throws MessageActionNetworkFailure with no live socket', () async {
+      expect(
+        () => repo.editMessage('msg-1', 'hi'),
+        throwsA(isA<MessageActionNetworkFailure>()),
+      );
+    });
+  });
+
+  group('deleteMessage', () {
+    test('sends the messageId over message:delete', () async {
+      final socket = FakeAckSocket({'ok': true});
+      final onlineRepo = repoWithSocket(() => socket);
+
+      await onlineRepo.deleteMessage('msg-1');
+
+      expect(socket.sentEvents, ['message:delete']);
+      expect(socket.sentPayloads.single, {'messageId': 'msg-1'});
+    });
+
+    test('throws the failure the ack names when it refuses', () async {
+      final socket = FakeAckSocket({'ok': false, 'code': 'NOT_FOUND'});
+      final onlineRepo = repoWithSocket(() => socket);
+
+      expect(
+        () => onlineRepo.deleteMessage('msg-1'),
+        throwsA(isA<MessageActionNotFound>()),
+      );
     });
   });
 
@@ -176,13 +307,7 @@ void main() {
         ),
       );
       final socket = FakeAckSocket({'ok': true, 'messageId': 'm1', 'createdAt': '2026-01-01T00:00:00.000Z'});
-      final onlineRepo = MessagesRepository(
-        db: db,
-        dio: dio,
-        tokenStore: TokenStore(const FlutterSecureStorage()),
-        syncEngine: engine,
-        currentSocket: () => socket,
-      );
+      final onlineRepo = repoWithSocket(() => socket);
 
       await onlineRepo.retry('c1');
       await pumpEventQueue();
@@ -289,13 +414,7 @@ void main() {
         ParticipantsCompanion.insert(conversationId: 'conv-1', userId: me),
       );
       final socket = FakeAckSocket({'ok': true});
-      final onlineRepo = MessagesRepository(
-        db: db,
-        dio: dio,
-        tokenStore: TokenStore(const FlutterSecureStorage()),
-        syncEngine: engine,
-        currentSocket: () => socket,
-      );
+      final onlineRepo = repoWithSocket(() => socket);
 
       await onlineRepo.markRead('conv-1');
       await pumpEventQueue();

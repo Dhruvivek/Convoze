@@ -2,7 +2,7 @@ import 'package:convoze/app.dart';
 import 'package:convoze/core/db/database.dart';
 import 'package:convoze/core/realtime/connection_manager.dart';
 import 'package:convoze/core/router/app_router.dart';
-import 'package:convoze/features/auth/presentation/account_menu.dart';
+import 'package:convoze/features/auth/presentation/logout_menu.dart';
 import 'package:convoze/features/conversations/presentation/chat_thread_screen.dart';
 import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -294,14 +294,14 @@ void main() {
         ),
       );
 
-      await tester.tap(find.byTooltip('Account'));
+      await tester.tap(find.byTooltip('More'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Log out'));
       await tester.pumpAndSettle();
 
       expect(find.text('1 unsent message will be lost.'), findsOneWidget);
 
-      await tester.tap(find.byKey(AccountMenu.confirmLogOutKey));
+      await tester.tap(find.byKey(LogoutMenu.confirmLogOutKey));
       await tester.pumpAndSettle();
 
       expect(find.text('Sign in'), findsOneWidget);

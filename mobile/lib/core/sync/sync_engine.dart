@@ -108,9 +108,7 @@ class SyncEngine {
         // either way.
         final clientMsgId = payload['clientMsgId'] as String?;
         if (clientMsgId != null) {
-          await (db.delete(
-            db.outbox,
-          )..where((t) => t.clientMsgId.equals(clientMsgId))).go();
+          await (db.delete(db.outbox)..where((t) => t.clientMsgId.equals(clientMsgId))).go();
         }
       case 'message.edited':
       case 'message.deleted':
@@ -121,6 +119,8 @@ class SyncEngine {
         await _applyReceipts(payload);
       case 'conversation.joined':
         await _applyConversationJoined(payload, myUserId: myUserId);
+      case 'conversation.prefs':
+        await applyConversationPrefs(db, payload);
       default:
         // Forward-compatible: `conversation.left`/`members`/`prefs` are
         // later specs' job (ADR 0008's own hydrator doesn't emit them yet
@@ -130,9 +130,10 @@ class SyncEngine {
   }
 
   Future<void> _incrementUnread(String conversationId) {
-    return db.customStatement('UPDATE conversations SET unread_count = unread_count + 1 WHERE id = ?', [
-      conversationId,
-    ]);
+    return db.customStatement(
+      'UPDATE conversations SET unread_count = unread_count + 1 WHERE id = ?',
+      [conversationId],
+    );
   }
 
   Future<void> _applyReaction(Map<String, dynamic> payload) {
@@ -227,32 +228,32 @@ class SyncEngine {
   // --- Outbox drainer --------------------------------------------------
 
   /// One serial FIFO drain across every Conversation (ADR 0009), run
-  /// whenever the socket (re)connects or catches up. Nothing inserts into
-  /// the Outbox yet — that's `send()`'s job in #53 — so this is exercised by
-  /// tests seeding rows directly until then.
+  /// whenever the socket (re)connects or catches up. Populated by
+  /// `MessagesRepository.sendText`/`sendMedia`.
   Future<void> drainOutbox(io.Socket socket) async {
     if (_draining) return;
     _draining = true;
     try {
       while (true) {
-        final next = await (db.select(db.outbox)
-              ..where((t) => t.status.equals('pending'))
-              ..orderBy([(t) => OrderingTerm.asc(t.createdAt)])
-              ..limit(1))
-            .getSingleOrNull();
+        final next =
+            await (db.select(db.outbox)
+                  ..where((t) => t.status.equals('pending'))
+                  ..orderBy([(t) => OrderingTerm.asc(t.createdAt)])
+                  ..limit(1))
+                .getSingleOrNull();
         if (next == null) return;
 
         Map<String, dynamic>? response;
         try {
           response = ((await socket.timeout(15000).emitWithAckAsync('message:send', {
-                    'clientMsgId': next.clientMsgId,
-                    'conversationId': next.conversationId,
-                    'content': next.content,
-                    if (next.replyToMessageId != null) 'replyToMessageId': next.replyToMessageId,
-                    if (next.linkPreview != null) 'linkPreview': jsonDecode(next.linkPreview!),
-                  }))
-                  as Map)
-              .cast<String, dynamic>();
+            'clientMsgId': next.clientMsgId,
+            'conversationId': next.conversationId,
+            'content': next.content,
+            'type': next.type,
+            if (next.replyToMessageId != null) 'replyToMessageId': next.replyToMessageId,
+            if (next.linkPreview != null) 'linkPreview': jsonDecode(next.linkPreview!),
+            if (next.media != null) 'media': jsonDecode(next.media!),
+          })) as Map).cast<String, dynamic>();
         } catch (_) {
           // Ack timed out or the socket dropped mid-send: stop, don't spin.
           // The next connect (or `sync:caught-up`) resumes the drain.
@@ -260,9 +261,7 @@ class SyncEngine {
         }
 
         if (response['ok'] == true) {
-          await (db.delete(
-            db.outbox,
-          )..where((t) => t.clientMsgId.equals(next.clientMsgId))).go();
+          await (db.delete(db.outbox)..where((t) => t.clientMsgId.equals(next.clientMsgId))).go();
           continue;
         }
 

@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { isUuid } from '../auth/tokens.js';
 import { sendError } from '../http/errors.js';
+import { createConversationPrefsUpdater, PIN_LIMIT } from './conversationPrefs.js';
 import { createDirectConversationStarter } from './directConversation.js';
 import { listConversations } from './listConversations.js';
 import { listMessages } from './messageHistory.js';
@@ -18,13 +19,30 @@ function parseLimit(raw) {
 
 // The REST surface a Device uses for anything it can't get live (#50): the
 // Conversation list, message history paging, and starting a direct chat.
-export function createMessagingRouter({ prisma, authenticated, wakeUser, joinUserToConversation }) {
+export function createMessagingRouter({ prisma, authenticated, wakeUser, joinUserToConversation, clock }) {
   const router = Router();
   const startDirectConversation = createDirectConversationStarter({
     prisma,
     onWake: wakeUser,
     joinUserToConversation,
   });
+  const conversationPrefs = createConversationPrefsUpdater({ prisma, onWake: wakeUser, clock });
+
+  function sendPrefsResult(res, result) {
+    if (!result.ok) {
+      if (result.code === 'NOT_FOUND') {
+        sendError(res, 404, 'not_found', 'Not found');
+      } else if (result.code === 'PIN_LIMIT') {
+        sendError(res, 409, 'pin_limit', `Can't pin more than ${PIN_LIMIT} conversations`);
+      } else if (result.code === 'MUST_LEAVE_GROUP') {
+        sendError(res, 409, 'must_leave_group', 'Leave the group before deleting it');
+      } else {
+        sendError(res, 400, 'invalid_request', 'Invalid request');
+      }
+      return;
+    }
+    res.json({ ...result.conversationRow, users: result.users });
+  }
 
   router.get('/', authenticated, async (req, res) => {
     const { cursor, limit: rawLimit } = req.query;
@@ -86,6 +104,39 @@ export function createMessagingRouter({ prisma, authenticated, wakeUser, joinUse
       createdAt: conversation.createdAt,
       users,
     });
+  });
+
+  // #45: pin/unpin, archive/unarchive and mute/unmute, one REST call per
+  // change, applying only to the caller (never seen by other Participants).
+  router.patch('/:id/prefs', authenticated, async (req, res) => {
+    if (!isUuid(req.params.id)) {
+      sendError(res, 400, 'invalid_request', 'Expected a valid Conversation id');
+      return;
+    }
+    const result = await conversationPrefs.updatePrefs(req.auth.userId, req.params.id, req.body);
+    sendPrefsResult(res, result);
+  });
+
+  // #45: remove this caller's own history up to the newest Message, keeping
+  // the Conversation in their list.
+  router.post('/:id/clear', authenticated, async (req, res) => {
+    if (!isUuid(req.params.id)) {
+      sendError(res, 400, 'invalid_request', 'Expected a valid Conversation id');
+      return;
+    }
+    const result = await conversationPrefs.clearHistory(req.auth.userId, req.params.id);
+    sendPrefsResult(res, result);
+  });
+
+  // #45: clear plus hide the Conversation from this caller's list. A group
+  // Conversation must be left first.
+  router.post('/:id/delete', authenticated, async (req, res) => {
+    if (!isUuid(req.params.id)) {
+      sendError(res, 400, 'invalid_request', 'Expected a valid Conversation id');
+      return;
+    }
+    const result = await conversationPrefs.deleteChat(req.auth.userId, req.params.id);
+    sendPrefsResult(res, result);
   });
 
   return router;

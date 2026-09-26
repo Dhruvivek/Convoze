@@ -37,7 +37,14 @@ Map<String, dynamic> update({
   required int seq,
   required String kind,
   required Map<String, dynamic> payload,
-}) => {'id': 'update-$seq', 'userId': me, 'seq': seq, 'kind': kind, 'createdAt': null, 'payload': payload};
+}) => {
+  'id': 'update-$seq',
+  'userId': me,
+  'seq': seq,
+  'kind': kind,
+  'createdAt': null,
+  'payload': payload,
+};
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -53,9 +60,7 @@ void main() {
     engine = SyncEngine(db: db, dio: Dio(), tokenStore: TokenStore(const FlutterSecureStorage()));
     await db
         .into(db.conversations)
-        .insert(
-          ConversationsCompanion.insert(id: 'conv-1', type: 'direct'),
-        );
+        .insert(ConversationsCompanion.insert(id: 'conv-1', type: 'direct'));
   });
 
   tearDown(() => db.close());
@@ -73,9 +78,7 @@ void main() {
     });
 
     expect(ackedSeq, 1);
-    final message = await (db.select(
-      db.messages,
-    )..where((t) => t.id.equals('msg-1'))).getSingle();
+    final message = await (db.select(db.messages)..where((t) => t.id.equals('msg-1'))).getSingle();
     expect(message.content, 'hi');
     final conversation = await (db.select(
       db.conversations,
@@ -186,9 +189,7 @@ void main() {
       ],
     });
 
-    final message = await (db.select(
-      db.messages,
-    )..where((t) => t.id.equals('msg-1'))).getSingle();
+    final message = await (db.select(db.messages)..where((t) => t.id.equals('msg-1'))).getSingle();
     expect(message.isDeleted, isTrue);
     expect(message.content, isNull);
   });
@@ -222,26 +223,18 @@ void main() {
       ],
     });
 
-    final message = await (db.select(
-      db.messages,
-    )..where((t) => t.id.equals('msg-1'))).getSingle();
+    final message = await (db.select(db.messages)..where((t) => t.id.equals('msg-1'))).getSingle();
     expect(message.reactions, '[{"userId":"$me","emoji":"👍"}]');
   });
 
   test('conversation.receipts sets watermarks and the absolute unreadCount', () async {
     await db
         .into(db.participants)
-        .insert(
-          ParticipantsCompanion.insert(conversationId: 'conv-1', userId: me),
-        );
+        .insert(ParticipantsCompanion.insert(conversationId: 'conv-1', userId: me));
     await db
         .into(db.conversations)
         .insertOnConflictUpdate(
-          ConversationsCompanion.insert(
-            id: 'conv-1',
-            type: 'direct',
-            unreadCount: Value(9),
-          ),
+          ConversationsCompanion.insert(id: 'conv-1', type: 'direct', unreadCount: Value(9)),
         );
 
     await engine.applyBatch({
@@ -261,10 +254,9 @@ void main() {
       ],
     });
 
-    final participant = await (db.select(db.participants)..where(
-          (t) => t.conversationId.equals('conv-1') & t.userId.equals(me),
-        ))
-        .getSingle();
+    final participant = await (db.select(
+      db.participants,
+    )..where((t) => t.conversationId.equals('conv-1') & t.userId.equals(me))).getSingle();
     expect(participant.lastReadMessageId, 'msg-5');
     final conversation = await (db.select(
       db.conversations,
@@ -299,6 +291,86 @@ void main() {
       db.participants,
     )..where((t) => t.conversationId.equals('conv-2'))).get();
     expect(participants.map((p) => p.userId).toSet(), {me, other});
+  });
+
+  test('conversation.prefs upserts the preference fields', () async {
+    await engine.applyBatch({
+      'users': [],
+      'updates': [
+        update(
+          seq: 1,
+          kind: 'conversation.prefs',
+          payload: {
+            'id': 'conv-1',
+            'pinnedAt': '2026-01-02T00:00:00.000Z',
+            'archivedAt': null,
+            'mutedUntil': '2026-01-03T00:00:00.000Z',
+            'hiddenAt': null,
+            'historyClearedMessageId': null,
+            'unreadCount': 3,
+          },
+        ),
+      ],
+    });
+
+    final conversation = await (db.select(
+      db.conversations,
+    )..where((t) => t.id.equals('conv-1'))).getSingle();
+    expect(
+      conversation.pinnedAt!.isAtSameMomentAs(DateTime.parse('2026-01-02T00:00:00.000Z')),
+      isTrue,
+    );
+    expect(
+      conversation.mutedUntil!.isAtSameMomentAs(DateTime.parse('2026-01-03T00:00:00.000Z')),
+      isTrue,
+    );
+    expect(conversation.archivedAt, isNull);
+    expect(conversation.unreadCount, 3);
+  });
+
+  test('conversation.prefs deletes local messages at or before the cleared watermark', () async {
+    await engine.applyBatch({
+      'users': [],
+      'updates': [
+        update(
+          seq: 1,
+          kind: 'message.new',
+          payload: messagePayload(id: 'msg-1', conversationId: 'conv-1', senderId: other),
+        ),
+        update(
+          seq: 2,
+          kind: 'message.new',
+          payload: messagePayload(id: 'msg-2', conversationId: 'conv-1', senderId: other),
+        ),
+      ],
+    });
+
+    await engine.applyBatch({
+      'users': [],
+      'updates': [
+        update(
+          seq: 3,
+          kind: 'conversation.prefs',
+          payload: {
+            'id': 'conv-1',
+            'pinnedAt': null,
+            'archivedAt': null,
+            'mutedUntil': null,
+            'hiddenAt': null,
+            'historyClearedMessageId': 'msg-1',
+          },
+        ),
+      ],
+    });
+
+    final remaining = await (db.select(
+      db.messages,
+    )..where((t) => t.conversationId.equals('conv-1'))).get();
+    expect(remaining.map((m) => m.id), ['msg-2']);
+    final conversation = await (db.select(
+      db.conversations,
+    )..where((t) => t.id.equals('conv-1'))).getSingle();
+    expect(conversation.historyClearedMessageId, 'msg-1');
   });
 
   test('the Outbox drainer sends a queued message and removes it on success', () async {

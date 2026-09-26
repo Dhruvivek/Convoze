@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../../core/db/database.dart';
 
 /// A `fromMe` Message's tick state (`CONTEXT.md`'s Read/Delivery watermark),
@@ -30,9 +32,17 @@ class ChatMessageView {
     required this.senderId,
     required this.fromMe,
     required this.content,
+    required this.type,
     required this.createdAt,
     required this.isDeleted,
+    this.editedAt,
     this.tick,
+    this.mediaUrl,
+    this.mediaThumbnailUrl,
+    this.mediaWidth,
+    this.mediaHeight,
+    this.mediaFileName,
+    this.mediaBytes,
   });
 
   /// The Message id, or the Outbox row's `clientMsgId` while still pending
@@ -44,11 +54,30 @@ class ChatMessageView {
   final String senderId;
   final bool fromMe;
   final String? content;
+
+  /// `'text'`, `'image'` or `'file'`.
+  final String type;
   final DateTime createdAt;
   final bool isDeleted;
 
+  /// Set once this Message has been edited (#56); null for a still-pending
+  /// Outbox row, which is never edited before it lands.
+  final DateTime? editedAt;
+
   /// Null for a Message from someone else, or a deleted Message of mine.
   final MessageTick? tick;
+
+  /// Null while still pending (the upload hasn't landed a delivery URL yet)
+  /// or for a text message.
+  final String? mediaUrl;
+  final String? mediaThumbnailUrl;
+  final int? mediaWidth;
+  final int? mediaHeight;
+  final String? mediaFileName;
+  final int? mediaBytes;
+
+  bool get isImage => type == 'image';
+  bool get isFile => type == 'file';
 }
 
 /// Merges confirmed [messages] and pending [outbox] rows for one
@@ -82,8 +111,10 @@ List<ChatMessageView> buildChatMessageViews({
         senderId: m.senderId,
         fromMe: m.senderId == myUserId,
         content: m.content,
+        type: m.type,
         createdAt: m.createdAt,
         isDeleted: m.isDeleted,
+        editedAt: m.editedAt,
         tick: m.senderId == myUserId && !m.isDeleted
             ? _confirmedTick(
                 messageId: m.id,
@@ -91,21 +122,42 @@ List<ChatMessageView> buildChatMessageViews({
                 isDirect: isDirect,
               )
             : null,
+        mediaUrl: m.mediaUrl,
+        mediaThumbnailUrl: m.mediaThumbnailUrl,
+        mediaWidth: m.mediaWidth,
+        mediaHeight: m.mediaHeight,
+        mediaFileName: m.mediaFileName,
+        mediaBytes: m.mediaBytes,
       ),
     ),
-    ...pending.map(
-      (o) => ChatMessageView(
-        id: o.clientMsgId,
-        clientMsgId: o.clientMsgId,
-        senderId: myUserId,
-        fromMe: true,
-        content: o.content,
-        createdAt: o.createdAt,
-        isDeleted: false,
-        tick: o.status == 'failed' ? MessageTick.failed : MessageTick.clock,
-      ),
-    ),
+    ...pending.map((o) => _pendingView(o, myUserId)),
   ];
+}
+
+/// A pending Outbox row's view: its media fields (if any) come from the
+/// JSON reference `MessagesRepository.sendMedia` queued (ADR 0009) — there's
+/// no delivery URL yet, only what the upload itself reported, so
+/// [ChatMessageView.mediaUrl]/[ChatMessageView.mediaThumbnailUrl] stay null
+/// until the real Message lands.
+ChatMessageView _pendingView(OutboxData o, String myUserId) {
+  final media = o.media == null
+      ? const <String, dynamic>{}
+      : (jsonDecode(o.media!) as Map).cast<String, dynamic>();
+  return ChatMessageView(
+    id: o.clientMsgId,
+    clientMsgId: o.clientMsgId,
+    senderId: myUserId,
+    fromMe: true,
+    content: o.content,
+    type: o.type,
+    createdAt: o.createdAt,
+    isDeleted: false,
+    tick: o.status == 'failed' ? MessageTick.failed : MessageTick.clock,
+    mediaWidth: media['width'] as int?,
+    mediaHeight: media['height'] as int?,
+    mediaFileName: media['fileName'] as String?,
+    mediaBytes: media['bytes'] as int?,
+  );
 }
 
 MessageTick _confirmedTick({

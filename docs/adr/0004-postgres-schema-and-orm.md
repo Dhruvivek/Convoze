@@ -39,14 +39,23 @@ Conversation
 
 Participant
  ├─ id (uuidv7 pk), conversationId (fk Conversation), userId (fk User),
- │  role (admin | member), lastReadMessageId (nullable fk Message), joinedAt
+ │  role (admin | member), joinedAt,
+ │  lastReadMessageId (nullable fk Message), lastDeliveredMessageId (nullable fk Message),
+ │  leftAt (nullable),
+ │  pinnedAt (nullable), archivedAt (nullable), mutedUntil (nullable),
+ │  hiddenAt (nullable), historyClearedMessageId (nullable fk Message)
+ │  — the last five are Conversation preferences (ADR 0009), visible only to
+ │  this Participant
 
 Message
  ├─ id (uuidv7 pk), conversationId (fk Conversation), senderId (fk User),
  │  content (nullable — required for type=text, optional caption otherwise),
- │  type (text | image | file | video), isDeleted, editedAt (nullable), createdAt,
- │  mediaPublicId (nullable), mediaResourceType (nullable),
- │  mediaBytes (nullable), mediaDuration (nullable)
+ │  type (text | image | file — video deferred, #40's reduced scope),
+ │  isDeleted, editedAt (nullable), createdAt,
+ │  mediaPublicId (nullable), mediaResourceType (nullable, 'image' | 'raw'),
+ │  mediaBytes (nullable), mediaWidth (nullable), mediaHeight (nullable),
+ │  mediaFormat (nullable), mediaFileName (nullable)
+ │  — never a stored URL: one is signed fresh at every read (#40)
  │  [index: (conversationId, createdAt)]
 
 Reaction

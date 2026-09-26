@@ -32,6 +32,7 @@ OutboxData outbox({
   clientMsgId: clientMsgId,
   conversationId: conversationId,
   content: 'draft',
+  type: 'text',
   status: status,
   retryCount: 0,
   createdAt: createdAt ?? DateTime.utc(2026, 1, 1),

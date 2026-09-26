@@ -67,15 +67,26 @@ class AuthState extends _$AuthState {
   Future<void> requestOtp(String phoneNumber) =>
       ref.read(authRepositoryProvider).requestOtp(phoneNumber);
 
-  Future<void> verifyOtp(String phoneNumber, String code) async {
-    final result = await ref
-        .read(authRepositoryProvider)
-        .verifyOtp(phoneNumber, code);
-    final tokenStore = ref.read(tokenStoreProvider);
-    await tokenStore.saveTokens(
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
+  /// Sets this Device's cached display name. Local-only for now — stands in
+  /// until there's a real profile-update endpoint to call before saving
+  /// (mirrors how the User is already cached locally after sign-in).
+  Future<void> updateDisplayName(String? name) async {
+    final current = state;
+    if (current is! Authenticated) return;
+    final trimmed = name?.trim();
+    final updated = User(
+      id: current.user.id,
+      phoneNumber: current.user.phoneNumber,
+      displayName: (trimmed == null || trimmed.isEmpty) ? null : trimmed,
     );
+    await ref.read(tokenStoreProvider).saveUser(updated);
+    state = Authenticated(updated);
+  }
+
+  Future<void> verifyOtp(String phoneNumber, String code) async {
+    final result = await ref.read(authRepositoryProvider).verifyOtp(phoneNumber, code);
+    final tokenStore = ref.read(tokenStoreProvider);
+    await tokenStore.saveTokens(accessToken: result.accessToken, refreshToken: result.refreshToken);
     await tokenStore.saveUser(result.user);
     state = Authenticated(result.user);
   }
@@ -89,8 +100,7 @@ class AuthState extends _$AuthState {
   /// being offline never leaves the user stuck signed in.
   ///
   /// A second call while one is in flight waits on that one.
-  Future<void> signOut() =>
-      _signingOut ??= _signOut().whenComplete(() => _signingOut = null);
+  Future<void> signOut() => _signingOut ??= _signOut().whenComplete(() => _signingOut = null);
 
   Future<void>? _signingOut;
 

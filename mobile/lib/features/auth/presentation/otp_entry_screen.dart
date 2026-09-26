@@ -3,7 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../core/theme/app_spacing.dart';
+import '../../../core/widgets/auth_scaffold.dart';
+import '../../../core/widgets/loading_filled_button.dart';
 import 'auth_failure_message.dart';
 import 'auth_state.dart';
 
@@ -66,9 +70,7 @@ class _OtpEntryScreenState extends ConsumerState<OtpEntryScreen> {
     try {
       // On success the router sees the auth state flip and shows
       // conversations; nothing to navigate here.
-      await ref
-          .read(authStateProvider.notifier)
-          .verifyOtp(widget.phoneNumber, code);
+      await ref.read(authStateProvider.notifier).verifyOtp(widget.phoneNumber, code);
     } catch (e) {
       if (mounted) setState(() => _error = authFailureMessage(e));
     } finally {
@@ -94,53 +96,73 @@ class _OtpEntryScreenState extends ConsumerState<OtpEntryScreen> {
   @override
   Widget build(BuildContext context) {
     final coolingDown = _cooldownSeconds > 0;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Enter code')),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('We texted a code to ${widget.phoneNumber}.'),
-            const SizedBox(height: 16),
-            TextField(
-              key: OtpEntryScreen.codeFieldKey,
-              controller: _code,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              autofillHints: const [AutofillHints.oneTimeCode],
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(labelText: 'Code'),
-              onSubmitted: (_) => _verify(),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+    return AuthScaffold(
+      title: 'Enter code',
+      headline: 'Check your messages',
+      children: [
+        Text.rich(
+          TextSpan(
+            style: Theme.of(context).textTheme.bodyLarge,
+            children: [
+              const TextSpan(text: 'We texted a code to '),
+              TextSpan(
+                text: widget.phoneNumber,
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
-            ] else if (_notice != null) ...[
-              const SizedBox(height: 12),
-              Text(_notice!),
+              const TextSpan(text: '.'),
             ],
-            const SizedBox(height: 24),
-            FilledButton(
-              onPressed: _verifying ? null : _verify,
-              child: const Text('Verify'),
-            ),
-            const SizedBox(height: 8),
-            TextButton(
-              key: OtpEntryScreen.resendButtonKey,
-              onPressed: coolingDown ? null : _resend,
-              child: Text(
-                coolingDown
-                    ? 'Resend code in ${_cooldownSeconds}s'
-                    : 'Resend code',
-              ),
-            ),
-          ],
+          ),
         ),
-      ),
+        const SizedBox(height: AppSpacing.sm),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            onPressed: () => context.pop(),
+            style: TextButton.styleFrom(
+              minimumSize: Size.zero,
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              alignment: Alignment.centerLeft,
+            ),
+            child: const Text('Edit number'),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        TextField(
+          key: OtpEntryScreen.codeFieldKey,
+          controller: _code,
+          keyboardType: TextInputType.number,
+          autofocus: true,
+          autofillHints: const [AutofillHints.oneTimeCode],
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700, letterSpacing: 10),
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(6),
+          ],
+          decoration: const InputDecoration(labelText: 'Code', counterText: ''),
+          onSubmitted: (_) => _verify(),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            _error!,
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(color: Theme.of(context).colorScheme.error),
+          ),
+        ] else if (_notice != null) ...[
+          const SizedBox(height: AppSpacing.md),
+          Text(_notice!, style: Theme.of(context).textTheme.bodySmall),
+        ],
+        const SizedBox(height: AppSpacing.xl),
+        LoadingFilledButton(label: 'Verify', loading: _verifying, onPressed: _verify),
+        const SizedBox(height: AppSpacing.xs),
+        TextButton(
+          key: OtpEntryScreen.resendButtonKey,
+          onPressed: coolingDown ? null : _resend,
+          child: Text(coolingDown ? 'Resend code in ${_cooldownSeconds}s' : 'Resend code'),
+        ),
+      ],
     );
   }
 }

@@ -32,7 +32,7 @@ class AppDatabase extends _$AppDatabase {
   /// Bump this when a table's definition changes; [migration] wipes and
   /// rebuilds everything except the Outbox, same as `sync:reset` (ADR 0009).
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -41,6 +41,13 @@ class AppDatabase extends _$AppDatabase {
       for (final table in _rebuildableTables(this)) {
         await m.deleteTable(table.actualTableName);
         await m.createTable(table);
+      }
+      // The Outbox itself survives every bump (it's the one table that
+      // isn't rebuildable server state), so a column it gains has to be
+      // added in place rather than recreated with the rest above.
+      if (from < 3) {
+        await m.addColumn(outbox, outbox.type);
+        await m.addColumn(outbox, outbox.media);
       }
     },
   );
@@ -84,9 +91,7 @@ class AppDatabase extends _$AppDatabase {
   /// The stored Sync cursor, or null if there isn't one (a fresh install, or
   /// right after a wipe) — sent as `since` in the socket handshake.
   Future<int?> readCursor() async {
-    final row = await (select(
-      syncState,
-    )..where((t) => t.id.equals(0))).getSingleOrNull();
+    final row = await (select(syncState)..where((t) => t.id.equals(0))).getSingleOrNull();
     return row?.cursor;
   }
 
@@ -94,9 +99,8 @@ class AppDatabase extends _$AppDatabase {
   /// committed (ADR 0008: ack only after apply), so a crash mid-batch never
   /// leaves the cursor ahead of what's actually on disk.
   Future<void> writeCursor(int seq) {
-    return into(syncState).insertOnConflictUpdate(
-      SyncStateCompanion.insert(id: const Value(0), cursor: seq),
-    );
+    return into(syncState)
+        .insertOnConflictUpdate(SyncStateCompanion.insert(id: const Value(0), cursor: seq));
   }
 }
 
