@@ -14,35 +14,37 @@ class ConnectingBanner extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final status = ref.watch(connectionStatusProvider).value;
-    final show =
-        status == ConnectionStatus.connecting ||
-        status == ConnectionStatus.reconnecting;
+    final show = status == ConnectionStatus.connecting || status == ConnectionStatus.reconnecting;
     if (!show) return const SizedBox.shrink();
 
-    final colors = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return Material(
       color: colors.secondaryContainer,
       child: SafeArea(
         bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: colors.onSecondaryContainer,
+        child: Semantics(
+          liveRegion: true,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: colors.onSecondaryContainer,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                'Connecting…',
-                style: TextStyle(color: colors.onSecondaryContainer),
-              ),
-            ],
+                const SizedBox(width: 12),
+                Text(
+                  'Connecting…',
+                  style: theme.textTheme.labelLarge?.copyWith(color: colors.onSecondaryContainer),
+                ),
+              ],
+            ),
           ),
         ),
       ),

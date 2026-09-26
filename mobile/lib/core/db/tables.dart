@@ -102,6 +102,21 @@ class Messages extends Table {
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get editedAt => dateTime().nullable()();
 
+  /// Media (photos/documents, `type` `image`/`file`): the Cloudinary asset
+  /// reference plus display metadata, mirrored from `messagePayload()`.
+  /// `mediaUrl`/`mediaThumbnailUrl` are the last signed delivery URLs the
+  /// server handed back — possibly stale (ADR 0002: signed URLs expire
+  /// ~1h), kept anyway so a media bubble has something to show offline.
+  TextColumn get mediaPublicId => text().nullable()();
+  TextColumn get mediaResourceType => text().nullable()();
+  IntColumn get mediaBytes => integer().nullable()();
+  IntColumn get mediaWidth => integer().nullable()();
+  IntColumn get mediaHeight => integer().nullable()();
+  TextColumn get mediaFormat => text().nullable()();
+  TextColumn get mediaFileName => text().nullable()();
+  TextColumn get mediaUrl => text().nullable()();
+  TextColumn get mediaThumbnailUrl => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -144,6 +159,14 @@ class Outbox extends Table {
 
   /// JSON `{url, title, description}` or null.
   TextColumn get linkPreview => text().nullable()();
+
+  /// `'text'`, `'image'` or `'file'`.
+  TextColumn get type => text().withDefault(const Constant('text'))();
+
+  /// JSON `{publicId, version, signature, resourceType, bytes, format,
+  /// width?, height?, fileName?}` — the already-uploaded Cloudinary asset
+  /// reference to send with `message:send`. Null for a text message.
+  TextColumn get media => text().nullable()();
 
   /// `'pending'` (queued or awaiting ack), `'sending'` (ack in flight) or
   /// `'failed'` ("tap to retry or delete", ADR 0009). `RATE_LIMITED` retries

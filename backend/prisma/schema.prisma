@@ -34,6 +34,8 @@ enum ParticipantRole {
 // enum (image | file | video) are a later spec's job (ADR 0004).
 enum MessageType {
   text
+  image
+  file
 }
 
 model User {
@@ -163,6 +165,17 @@ model Message {
   isDeleted   Boolean     @default(false)
   createdAt   DateTime    @default(now()) @db.Timestamptz(3)
   editedAt    DateTime?   @db.Timestamptz(3)
+
+  // Media (#40, reduced scope — photos & documents only, no video): the
+  // Cloudinary asset reference. Node never stores a servable URL — one is
+  // signed fresh at every read (`messagePayload()`), per ADR 0002.
+  mediaPublicId     String? @db.VarChar(255)
+  mediaResourceType String? // 'image' | 'raw' (video out of scope this pass)
+  mediaBytes        Int?
+  mediaWidth        Int?
+  mediaHeight       Int?
+  mediaFormat       String?
+  mediaFileName     String? @db.VarChar(255)
 
   reactions            Reaction[]
   userUpdates          UserUpdate[]

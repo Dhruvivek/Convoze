@@ -65,6 +65,18 @@ Future<void> upsertMessagePayload(AppDatabase db, Map<String, dynamic> payload) 
             payload['editedAt'] == null ? null : DateTime.parse(payload['editedAt'] as String),
           ),
           isDeleted: const Value(false),
+          // Media (photos/documents): absent for a text message, same
+          // "absent means don't touch it on an UPDATE" reasoning as
+          // `reactions` below.
+          mediaPublicId: Value(payload['mediaPublicId'] as String?),
+          mediaResourceType: Value(payload['mediaResourceType'] as String?),
+          mediaBytes: Value(payload['mediaBytes'] as int?),
+          mediaWidth: Value(payload['mediaWidth'] as int?),
+          mediaHeight: Value(payload['mediaHeight'] as int?),
+          mediaFormat: Value(payload['mediaFormat'] as String?),
+          mediaFileName: Value(payload['mediaFileName'] as String?),
+          mediaUrl: Value(payload['mediaUrl'] as String?),
+          mediaThumbnailUrl: Value(payload['mediaThumbnailUrl'] as String?),
           // `reactions` is left absent on purpose: it isn't part of
           // `messagePayload()`, only `reaction.changed` carries it, and
           // `insertOnConflictUpdate` skips absent columns in its UPDATE, so

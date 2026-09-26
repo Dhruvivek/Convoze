@@ -30,7 +30,22 @@ export function createMessageDeleter({ prisma, onWake }) {
       async (tx) => {
         await tx.message.update({
           where: { id: messageId },
-          data: { isDeleted: true, content: null, linkPreview: null },
+          data: {
+            isDeleted: true,
+            content: null,
+            linkPreview: null,
+            // A deleted media message's asset must stop being signable too
+            // (#40 story 23: "disappear for everyone, thumbnail included") —
+            // clearing these means `GET /messages/:id/media` and every
+            // `messagePayload()` read path have nothing left to sign.
+            mediaPublicId: null,
+            mediaResourceType: null,
+            mediaBytes: null,
+            mediaWidth: null,
+            mediaHeight: null,
+            mediaFormat: null,
+            mediaFileName: null,
+          },
         });
         await writeUpdatesInTx(
           tx,

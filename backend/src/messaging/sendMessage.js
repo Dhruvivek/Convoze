@@ -1,12 +1,66 @@
 import { isUuid } from '../auth/tokens.js';
+import { MEDIA_LIMITS, verifyUploadResponse } from '../media/cloudinarySigner.js';
 import { UPDATE_KINDS } from './kinds.js';
 import { writeUpdatesInTx } from './updateWriter.js';
 
 const MAX_CONTENT_BYTES = 4096;
 const MAX_LINK_TITLE_LENGTH = 200;
 const MAX_LINK_DESCRIPTION_LENGTH = 500;
+const MAX_FILE_NAME_LENGTH = 255;
 
 const INVALID_LINK_PREVIEW = Symbol('invalid-link-preview');
+const INVALID_MEDIA = Symbol('invalid-media');
+const MEDIA_TOO_LARGE = Symbol('media-too-large');
+
+// `type: 'text'` carries no `media`; `'image'`/`'file'` (#40, reduced
+// scope — video isn't a supported `type` this pass) must reference an
+// asset the sender themselves just uploaded: `publicId` proves ownership by
+// living in the sender's own Cloudinary folder, `verifyUploadResponse`
+// proves Cloudinary actually stored it (ADR 0002 — no Admin API call
+// needed), and the byte/type checks stand in for the upload-preset
+// enforcement #40's full scope would otherwise rely on (see
+// `cloudinarySigner.js`'s comment on why no preset exists here).
+function validateMedia(userId, type, media) {
+  if (type === 'text') return { ok: true, data: null };
+
+  const limits = MEDIA_LIMITS[type];
+  if (!limits || typeof media !== 'object' || media === null) return { ok: false, reason: INVALID_MEDIA };
+
+  const { publicId, version, signature, resourceType, bytes, format, width, height, fileName } = media;
+  if (typeof publicId !== 'string' || !publicId.startsWith(`u/${userId}/`)) {
+    return { ok: false, reason: INVALID_MEDIA };
+  }
+  if (!verifyUploadResponse({ publicId, version, signature })) return { ok: false, reason: INVALID_MEDIA };
+  if (resourceType !== limits.resourceType) return { ok: false, reason: INVALID_MEDIA };
+  if (typeof bytes !== 'number' || bytes <= 0) return { ok: false, reason: INVALID_MEDIA };
+  if (bytes > limits.maxBytes) return { ok: false, reason: MEDIA_TOO_LARGE };
+  if (typeof format !== 'string' || !limits.formats.includes(format.toLowerCase())) {
+    return { ok: false, reason: INVALID_MEDIA };
+  }
+
+  let sanitizedFileName = null;
+  if (type === 'file') {
+    if (typeof fileName !== 'string' || fileName.trim().length === 0) {
+      return { ok: false, reason: INVALID_MEDIA };
+    }
+    // Strip any path component a hostile client sent — only the display
+    // name is ever trusted, never used as an actual filesystem path.
+    sanitizedFileName = fileName.trim().replaceAll(/[/\\]/g, '_').slice(0, MAX_FILE_NAME_LENGTH);
+  }
+
+  return {
+    ok: true,
+    data: {
+      mediaPublicId: publicId,
+      mediaResourceType: resourceType,
+      mediaBytes: Math.trunc(bytes),
+      mediaWidth: typeof width === 'number' ? Math.trunc(width) : null,
+      mediaHeight: typeof height === 'number' ? Math.trunc(height) : null,
+      mediaFormat: typeof format === 'string' ? format.slice(0, 32) : null,
+      mediaFileName: sanitizedFileName,
+    },
+  };
+}
 
 // `null` (no preview given), a normalised `{url, title, description}`, or
 // the sentinel above for anything malformed.
@@ -46,9 +100,15 @@ function fail(code) {
 // touching this file again.
 export function createMessageSender({ prisma, rateLimiter, onWake, onMessageCommitted = () => {} }) {
   return async function sendMessage(userId, request) {
-    const { clientMsgId, conversationId, content, replyToMessageId, linkPreview } = request ?? {};
+    const { clientMsgId, conversationId, content, replyToMessageId, linkPreview, media } = request ?? {};
+    const type = request?.type ?? 'text';
 
-    if (!isUuid(clientMsgId) || !isUuid(conversationId) || typeof content !== 'string') {
+    if (
+      !isUuid(clientMsgId) ||
+      !isUuid(conversationId) ||
+      typeof content !== 'string' ||
+      (type !== 'text' && type !== 'image' && type !== 'file')
+    ) {
       return fail('INVALID');
     }
 
@@ -67,10 +127,15 @@ export function createMessageSender({ prisma, rateLimiter, onWake, onMessageComm
     });
     if (!participant) return fail('NOT_PARTICIPANT');
 
+    // A media message's `content` is an optional caption; a text message's
+    // is the whole point of it, so only that one requires a non-empty body.
     const trimmed = content.trim();
     const contentBytes = Buffer.byteLength(trimmed, 'utf8');
-    if (contentBytes === 0) return fail('INVALID');
+    if (type === 'text' && contentBytes === 0) return fail('INVALID');
     if (contentBytes > MAX_CONTENT_BYTES) return fail('TOO_LARGE');
+
+    const mediaResult = validateMedia(userId, type, media);
+    if (!mediaResult.ok) return fail(mediaResult.reason === MEDIA_TOO_LARGE ? 'TOO_LARGE' : 'INVALID');
 
     if (replyToMessageId !== undefined && replyToMessageId !== null) {
       if (!isUuid(replyToMessageId)) return fail('INVALID');
@@ -96,9 +161,13 @@ export function createMessageSender({ prisma, rateLimiter, onWake, onMessageComm
               conversationId,
               senderId: userId,
               clientMsgId,
-              content: trimmed,
+              type,
+              // A media message with no caption stores `null`, not `''`,
+              // matching every other optional-content path in this schema.
+              content: trimmed.length > 0 ? trimmed : null,
               replyToMessageId: replyToMessageId ?? null,
               linkPreview: normalizedLinkPreview,
+              ...mediaResult.data,
             },
           });
           // A Conversation this Participant deleted (#45) reappears — with
