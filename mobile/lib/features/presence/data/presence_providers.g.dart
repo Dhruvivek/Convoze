@@ -56,7 +56,7 @@ final class OwnDisconnectedAtProvider
   }
 }
 
-String _$ownDisconnectedAtHash() => r'99be16185b2c2151e355324d80011ca2b83878da';
+String _$ownDisconnectedAtHash() => r'a41d3381d702e9202880c326064e66ffb67ccebc';
 
 /// The moment this Device's own connection was last seen leaving `connected`
 /// — null while connected, or if it never has dropped. The anchor

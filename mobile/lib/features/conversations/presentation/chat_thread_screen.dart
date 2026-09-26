@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/chat_message_view.dart';
 import '../data/messages_repository.dart';
+import '../data/typing_repository.dart';
 import 'chat_message_list.dart';
 import 'chat_thread_providers.dart';
 
@@ -35,11 +36,19 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   /// call it again.
   String? _readThrough;
 
+  /// Read once in [initState], not via `ref.read` in [dispose]: by the time
+  /// `dispose()` runs, this widget is already unmounted (`State.mounted` is
+  /// false), and Riverpod's `ref` refuses to resolve a provider against an
+  /// unmounted widget's `BuildContext` — it throws rather than risk stale
+  /// state.
+  late final TypingRepository _typingRepository;
+
   static const _loadOlderThreshold = 200.0;
 
   @override
   void initState() {
     super.initState();
+    _typingRepository = ref.read(typingRepositoryProvider);
     _scroll.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref
@@ -57,6 +66,8 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
       ..removeListener(_onScroll)
       ..dispose();
     _composer.dispose();
+    // Leaving the chat is one of #35's own "stop typing" triggers.
+    _typingRepository.stopTyping(widget.conversationId);
     super.dispose();
   }
 
@@ -74,7 +85,14 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     final text = _composer.text;
     if (text.trim().isEmpty) return;
     _composer.clear();
+    // `TextEditingController.clear()` doesn't fire `onChanged`, so this
+    // needs its own explicit call (#35: "stopTyping is emitted on send").
+    _typingRepository.stopTyping(widget.conversationId);
     await ref.read(messagesRepositoryProvider).send(widget.conversationId, text);
+  }
+
+  void _onComposerChanged(String text) {
+    _typingRepository.composerChanged(widget.conversationId, text);
   }
 
   /// "failed — tap to retry or delete" (ADR 0009): offers both, then acts on
@@ -173,6 +191,7 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
             fieldKey: ChatThreadScreen.composerFieldKey,
             sendKey: ChatThreadScreen.sendButtonKey,
             onSend: _send,
+            onChanged: _onComposerChanged,
           ),
         ],
       ),
@@ -214,12 +233,14 @@ class _Composer extends StatelessWidget {
     required this.fieldKey,
     required this.sendKey,
     required this.onSend,
+    required this.onChanged,
   });
 
   final TextEditingController controller;
   final Key fieldKey;
   final Key sendKey;
   final VoidCallback onSend;
+  final ValueChanged<String> onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -235,6 +256,7 @@ class _Composer extends StatelessWidget {
                 minLines: 1,
                 maxLines: 5,
                 textInputAction: TextInputAction.send,
+                onChanged: onChanged,
                 onSubmitted: (_) => onSend(),
                 decoration: const InputDecoration(hintText: 'Message'),
               ),

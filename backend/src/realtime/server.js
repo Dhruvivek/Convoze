@@ -174,6 +174,23 @@ export function createRealtime({
     socket.on('reaction:toggle', handle(toggleReaction, 'reaction:toggle'));
     socket.on('conversation:read', handle(markRead, 'conversation:read'));
 
+    // Typing relay (#35): stateless, no ack, no Update. Silently dropped
+    // unless the socket is actually in that Conversation's room (ADR 0005:
+    // a non-participant can't inject a fake indicator), otherwise broadcast
+    // to the room excluding the sender, with their userId attached.
+    function relayTyping(event) {
+      return (payload) => {
+        const conversationId = payload?.conversationId;
+        if (typeof conversationId !== 'string') return;
+        const room = conversationRoom(conversationId);
+        if (!socket.rooms.has(room)) return;
+        socket.to(room).emit(event, { conversationId, userId });
+      };
+    }
+
+    socket.on('typing', relayTyping('typing'));
+    socket.on('stopTyping', relayTyping('stopTyping'));
+
     socket.on('disconnect', () => {
       pump.stop();
       removePump(userId, pump);
