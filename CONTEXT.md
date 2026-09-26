@@ -17,7 +17,7 @@ A single marker per Participant recording the last Message they've read in a Con
 _Avoid_: read receipt (implies a record per message per reader, which this project deliberately does not do), delivery status
 
 **Presence**:
-A User's online/last-seen status, derived server-side from their currently-connected sockets — not a stored field. Distinct from a client's *belief* about another User's presence, which goes stale while the client's own socket is disconnected and must never be shown as a confident "offline" during that gap.
+A User's online/last-seen status. "Online" is derived server-side from their currently-connected sockets and never stored; "last seen" is the one part that is — `User.lastSeenAt`, written the moment their last live socket disconnects, so it survives a restart (#34). Distinct from a client's *belief* about another User's presence, which goes stale while the client's own socket is disconnected and must never be shown as a confident "offline" during that gap.
 _Avoid_: online status, connection status (that's the client's own transport state, not another User's presence)
 
 **Device token**:

@@ -43,6 +43,11 @@ model User {
   displayName                String?
   avatarUrl                  String?
   createdAt                  DateTime       @default(now()) @db.Timestamptz(3)
+  // When this User's last live socket disconnected (#34, ADR 0005). "Online"
+  // itself is never stored — only derived from the live-connection registry
+  // — so this is null until the first disconnect, and stops moving while
+  // they're online.
+  lastSeenAt                 DateTime?      @db.Timestamptz(3)
   sessions                   Session[]
   participants               Participant[]
   messages                   Message[]

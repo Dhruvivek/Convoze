@@ -19,10 +19,15 @@ export function createConnectionRegistry() {
   }
 
   return {
+    // Reports whether this was the user's first live socket (#34: fires
+    // `userOnline`), which a reconnecting Session's second socket, or a
+    // second Device, is not.
     register(socketId, { userId, sessionId }) {
+      const userCameOnline = !sessionsByUser.has(userId);
       owners.set(socketId, { userId, sessionId });
       add(socketsBySession, sessionId, socketId);
       add(sessionsByUser, userId, sessionId);
+      return { userCameOnline };
     },
 
     // Forgets the socket. Reports whether it was its user's last live socket.
@@ -49,6 +54,11 @@ export function createConnectionRegistry() {
 
     isOnline(userId) {
       return sessionsByUser.has(userId);
+    },
+
+    // Every currently online user (#34's graceful-shutdown pass).
+    onlineUserIds() {
+      return [...sessionsByUser.keys()];
     },
   };
 }
