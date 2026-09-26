@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:path/path.dart' as p;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../core/network/dio_provider.dart';
@@ -22,16 +23,22 @@ class CloudinaryUploadResult {
     this.height,
   });
 
-  factory CloudinaryUploadResult.fromResponse(Map<String, dynamic> json) => CloudinaryUploadResult(
-    publicId: json['public_id'] as String,
-    version: json['version'].toString(),
-    signature: json['signature'] as String,
-    resourceType: json['resource_type'] as String,
-    bytes: json['bytes'] as int,
-    format: json['format'] as String? ?? '',
-    width: json['width'] as int?,
-    height: json['height'] as int?,
-  );
+  /// `fallbackFormat` covers Cloudinary's `raw` (document) uploads, whose
+  /// response never includes a `format` field the way `image` uploads do —
+  /// confirmed directly against the real API, not assumed. The caller
+  /// passes the picked file's own extension, which the file picker already
+  /// constrained to `MEDIA_LIMITS.file.formats`.
+  factory CloudinaryUploadResult.fromResponse(Map<String, dynamic> json, {String? fallbackFormat}) =>
+      CloudinaryUploadResult(
+        publicId: json['public_id'] as String,
+        version: json['version'].toString(),
+        signature: json['signature'] as String,
+        resourceType: json['resource_type'] as String,
+        bytes: json['bytes'] as int,
+        format: (json['format'] as String?) ?? fallbackFormat ?? '',
+        width: json['width'] as int?,
+        height: json['height'] as int?,
+      );
 
   final String publicId;
   final String version;
@@ -91,7 +98,11 @@ class MediaRepository {
         'file': await MultipartFile.fromFile(file.path),
       }),
     );
-    return CloudinaryUploadResult.fromResponse(response.data!);
+    final extension = p.extension(file.path).replaceFirst('.', '').toLowerCase();
+    return CloudinaryUploadResult.fromResponse(
+      response.data!,
+      fallbackFormat: extension.isEmpty ? null : extension,
+    );
   }
 }
 
