@@ -6,25 +6,8 @@ import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:socket_io_client/socket_io_client.dart' as io;
-import 'package:socket_io_client/src/manager.dart';
 
-/// A socket double for the Outbox drainer: [emitWithAckAsync] returns
-/// [response] instead of touching the network, mirroring what
-/// `message:send`'s ack contract returns (`sendMessage.js`).
-class _FakeAckSocket extends io.Socket {
-  _FakeAckSocket(this.response)
-    : super(Manager(uri: 'http://fake', options: {'autoConnect': false}), '/', const {});
-
-  final Map<String, dynamic> response;
-  final sentEvents = <String>[];
-
-  @override
-  Future emitWithAckAsync(String event, dynamic data, {Function? ack, bool binary = false}) async {
-    sentEvents.add(event);
-    return response;
-  }
-}
+import '../../support/fake_ack_socket.dart';
 
 const me = 'user-me';
 const other = 'user-other';
@@ -54,7 +37,14 @@ Map<String, dynamic> update({
   required int seq,
   required String kind,
   required Map<String, dynamic> payload,
-}) => {'id': 'update-$seq', 'userId': me, 'seq': seq, 'kind': kind, 'createdAt': null, 'payload': payload};
+}) => {
+  'id': 'update-$seq',
+  'userId': me,
+  'seq': seq,
+  'kind': kind,
+  'createdAt': null,
+  'payload': payload,
+};
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -70,9 +60,7 @@ void main() {
     engine = SyncEngine(db: db, dio: Dio(), tokenStore: TokenStore(const FlutterSecureStorage()));
     await db
         .into(db.conversations)
-        .insert(
-          ConversationsCompanion.insert(id: 'conv-1', type: 'direct'),
-        );
+        .insert(ConversationsCompanion.insert(id: 'conv-1', type: 'direct'));
   });
 
   tearDown(() => db.close());
@@ -90,9 +78,7 @@ void main() {
     });
 
     expect(ackedSeq, 1);
-    final message = await (db.select(
-      db.messages,
-    )..where((t) => t.id.equals('msg-1'))).getSingle();
+    final message = await (db.select(db.messages)..where((t) => t.id.equals('msg-1'))).getSingle();
     expect(message.content, 'hi');
     final conversation = await (db.select(
       db.conversations,
@@ -203,9 +189,7 @@ void main() {
       ],
     });
 
-    final message = await (db.select(
-      db.messages,
-    )..where((t) => t.id.equals('msg-1'))).getSingle();
+    final message = await (db.select(db.messages)..where((t) => t.id.equals('msg-1'))).getSingle();
     expect(message.isDeleted, isTrue);
     expect(message.content, isNull);
   });
@@ -239,26 +223,18 @@ void main() {
       ],
     });
 
-    final message = await (db.select(
-      db.messages,
-    )..where((t) => t.id.equals('msg-1'))).getSingle();
+    final message = await (db.select(db.messages)..where((t) => t.id.equals('msg-1'))).getSingle();
     expect(message.reactions, '[{"userId":"$me","emoji":"👍"}]');
   });
 
   test('conversation.receipts sets watermarks and the absolute unreadCount', () async {
     await db
         .into(db.participants)
-        .insert(
-          ParticipantsCompanion.insert(conversationId: 'conv-1', userId: me),
-        );
+        .insert(ParticipantsCompanion.insert(conversationId: 'conv-1', userId: me));
     await db
         .into(db.conversations)
         .insertOnConflictUpdate(
-          ConversationsCompanion.insert(
-            id: 'conv-1',
-            type: 'direct',
-            unreadCount: Value(9),
-          ),
+          ConversationsCompanion.insert(id: 'conv-1', type: 'direct', unreadCount: Value(9)),
         );
 
     await engine.applyBatch({
@@ -278,10 +254,9 @@ void main() {
       ],
     });
 
-    final participant = await (db.select(db.participants)..where(
-          (t) => t.conversationId.equals('conv-1') & t.userId.equals(me),
-        ))
-        .getSingle();
+    final participant = await (db.select(
+      db.participants,
+    )..where((t) => t.conversationId.equals('conv-1') & t.userId.equals(me))).getSingle();
     expect(participant.lastReadMessageId, 'msg-5');
     final conversation = await (db.select(
       db.conversations,
@@ -409,7 +384,7 @@ void main() {
             createdAt: DateTime.now(),
           ),
         );
-    final socket = _FakeAckSocket({'ok': true, 'messageId': 'msg-1'});
+    final socket = FakeAckSocket({'ok': true, 'messageId': 'msg-1'});
 
     await engine.drainOutbox(socket);
 
@@ -428,7 +403,7 @@ void main() {
             createdAt: DateTime.now(),
           ),
         );
-    final socket = _FakeAckSocket({'ok': false, 'code': 'NOT_PARTICIPANT'});
+    final socket = FakeAckSocket({'ok': false, 'code': 'NOT_PARTICIPANT'});
 
     await engine.drainOutbox(socket);
 

@@ -12,6 +12,7 @@ LocalChatMessage _message({
   String? mediaFileName,
   int? mediaBytes,
   String? mediaThumbnailUrl,
+  DateTime? editedAt,
 }) => LocalChatMessage(
   clientMsgId: 'c1',
   senderIsMe: senderIsMe,
@@ -19,6 +20,7 @@ LocalChatMessage _message({
   type: type,
   isDeleted: false,
   createdAt: DateTime.utc(2026, 1, 1),
+  editedAt: editedAt,
   isPending: isPending,
   isFailed: isFailed,
   mediaFileName: mediaFileName,
@@ -63,5 +65,15 @@ void main() {
   testWidgets('a failed message shows an error icon', (tester) async {
     await pump(tester, _message(isFailed: true));
     expect(find.byIcon(Icons.error_outline), findsOneWidget);
+  });
+
+  testWidgets('an edited message shows an (edited) label', (tester) async {
+    await pump(tester, _message(editedAt: DateTime.utc(2026, 1, 1, 12)));
+    expect(find.text('(edited)'), findsOneWidget);
+  });
+
+  testWidgets('an unedited message shows no (edited) label', (tester) async {
+    await pump(tester, _message());
+    expect(find.text('(edited)'), findsNothing);
   });
 }

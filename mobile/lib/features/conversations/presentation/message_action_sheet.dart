@@ -3,15 +3,22 @@ import 'package:flutter/services.dart';
 
 import '../data/local_chat_message.dart';
 
-/// The long-press action sheet for a message. Reduced to "Copy" for this
-/// pass: edit/delete/react have no real backend wiring yet (out of scope
-/// here), and offering them against the real, read-only replica would be a
-/// dead end that looks like it did something. Extending this once
-/// edit/delete/react are real is a matter of adding rows back, not
-/// redesigning the sheet.
-Future<void> showMessageActions(BuildContext context, {required LocalChatMessage message}) {
+/// The long-press action sheet for a message: "Copy" for any text message,
+/// plus "Edit" and "Delete" (#56) for the sender's own, already-landed text
+/// messages — a still-pending Outbox row has no `messageId` yet for either
+/// call to reference, and media/others' messages get neither. Whether the
+/// two calls actually go through is decided at tap time (see
+/// `ensureConnected`/`message_action.dart`), not here: this sheet is pure
+/// UI, unaware of the connection.
+Future<void> showMessageActions(
+  BuildContext context, {
+  required LocalChatMessage message,
+  VoidCallback? onEdit,
+  VoidCallback? onDelete,
+}) {
   final text = message.content ?? '';
-  if (text.isEmpty) return Future.value();
+  final canModify = message.senderIsMe && message.type == 'text' && message.id != null;
+  if (text.isEmpty && !canModify) return Future.value();
   return showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
@@ -19,14 +26,33 @@ Future<void> showMessageActions(BuildContext context, {required LocalChatMessage
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          ListTile(
-            leading: const Icon(Icons.copy_outlined),
-            title: const Text('Copy'),
-            onTap: () {
-              Navigator.of(sheetContext).pop();
-              Clipboard.setData(ClipboardData(text: text));
-            },
-          ),
+          if (text.isNotEmpty)
+            ListTile(
+              leading: const Icon(Icons.copy_outlined),
+              title: const Text('Copy'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                Clipboard.setData(ClipboardData(text: text));
+              },
+            ),
+          if (canModify)
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Edit'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                onEdit?.call();
+              },
+            ),
+          if (canModify)
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Delete'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                onDelete?.call();
+              },
+            ),
         ],
       ),
     ),

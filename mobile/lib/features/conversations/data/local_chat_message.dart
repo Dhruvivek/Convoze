@@ -16,6 +16,7 @@ class LocalChatMessage {
     required this.isPending,
     required this.isFailed,
     this.id,
+    this.editedAt,
     this.mediaPublicId,
     this.mediaResourceType,
     this.mediaBytes,
@@ -40,6 +41,10 @@ class LocalChatMessage {
   final String type;
   final bool isDeleted;
   final DateTime createdAt;
+
+  /// Set once this Message has been edited (#56); null for a Message from
+  /// someone else's Outbox row, which is never edited before it lands.
+  final DateTime? editedAt;
 
   /// Still sitting in the Outbox, not yet acknowledged by the server.
   final bool isPending;

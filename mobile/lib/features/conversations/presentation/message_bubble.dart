@@ -69,11 +69,21 @@ class MessageBubble extends StatelessWidget {
                   _ImageContent(message: message, foreground: foreground)
                 else if (message.isFile)
                   _FileContent(message: message, foreground: foreground)
-                else
+                else ...[
                   Text(
                     message.content ?? '',
                     style: TextStyle(color: foreground, fontSize: 15.5, height: 1.3),
                   ),
+                  if (message.editedAt != null)
+                    Text(
+                      '(edited)',
+                      style: TextStyle(
+                        color: foreground.withValues(alpha: 0.65),
+                        fontSize: 11.5,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                ],
                 if (!deleted && mine) ...[
                   const SizedBox(height: 2),
                   Icon(

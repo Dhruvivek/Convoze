@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:uuid/uuid.dart';
 
 import '../../../core/db/database.dart';
@@ -9,6 +10,7 @@ import '../../../core/db/database_provider.dart';
 import '../../auth/presentation/auth_state.dart';
 import 'local_chat_message.dart';
 import 'media_repository.dart';
+import 'message_action_failure.dart';
 
 part 'messages_repository.g.dart';
 
@@ -26,9 +28,9 @@ enum MediaKind {
 /// Sending and reading a chat thread's messages: real (unlike the mock
 /// `mock_thread.dart` this replaces), but deliberately minimal — no read
 /// receipts, no history pagination beyond what `rest_snapshot.dart` already
-/// rebuilds, no edit/delete/react wiring. `sendText`/`sendMedia` insert into
-/// the `Outbox`; the already-real `SyncEngine.drainOutbox` (#51) does the
-/// rest.
+/// rebuilds, no react wiring. `sendText`/`sendMedia` insert into the
+/// `Outbox`; the already-real `SyncEngine.drainOutbox` (#51) does the rest.
+/// `editMessage`/`deleteMessage` (#56) go straight over the socket instead.
 class MessagesRepository {
   MessagesRepository(this._db);
 
@@ -48,6 +50,48 @@ class MessagesRepository {
             createdAt: DateTime.now(),
           ),
         );
+  }
+
+  /// Edits [messageId] (the sender's own, still-plain-text Message) via a
+  /// direct `message:edit` ack (#56) — not queued in the Outbox, the same
+  /// reasoning as `ConversationPrefsRepository`: there's no offline case to
+  /// resume, only one to refuse (see `ensureConnected`). The local replica
+  /// isn't touched here; the `message.edited` Update this fans out echoes
+  /// back and applies through the usual sync path, sender included.
+  Future<void> editMessage(
+    io.Socket socket, {
+    required String messageId,
+    required String content,
+  }) async {
+    final response = await _emitForAck(socket, 'message:edit', {
+      'messageId': messageId,
+      'content': content.trim(),
+    });
+    if (response['ok'] != true) {
+      throw MessageActionFailure.fromCode(response['code'] as String?);
+    }
+  }
+
+  /// Deletes [messageId] (the sender's own Message) via a direct
+  /// `message:delete` ack (#56) — see [editMessage].
+  Future<void> deleteMessage(io.Socket socket, {required String messageId}) async {
+    final response = await _emitForAck(socket, 'message:delete', {'messageId': messageId});
+    if (response['ok'] != true) {
+      throw MessageActionFailure.fromCode(response['code'] as String?);
+    }
+  }
+
+  Future<Map<String, dynamic>> _emitForAck(
+    io.Socket socket,
+    String event,
+    Map<String, dynamic> data,
+  ) async {
+    try {
+      final response = await socket.timeout(15000).emitWithAckAsync(event, data);
+      return (response as Map).cast<String, dynamic>();
+    } catch (_) {
+      throw const MessageActionNetworkFailure();
+    }
   }
 
   Future<void> sendMedia(
@@ -84,7 +128,7 @@ class MessagesRepository {
       SELECT
         m.id AS id, m.client_msg_id AS client_msg_id, m.sender_id AS sender_id,
         m.content AS content, m.type AS type, m.is_deleted AS is_deleted,
-        m.created_at AS created_at,
+        m.created_at AS created_at, m.edited_at AS edited_at,
         m.media_public_id AS media_public_id, m.media_resource_type AS media_resource_type,
         m.media_bytes AS media_bytes, m.media_width AS media_width, m.media_height AS media_height,
         m.media_format AS media_format, m.media_file_name AS media_file_name,
@@ -96,7 +140,7 @@ class MessagesRepository {
       SELECT
         NULL AS id, o.client_msg_id AS client_msg_id, ?2 AS sender_id,
         o.content AS content, o.type AS type, 0 AS is_deleted,
-        o.created_at AS created_at,
+        o.created_at AS created_at, NULL AS edited_at,
         json_extract(o.media, '\$.publicId') AS media_public_id,
         json_extract(o.media, '\$.resourceType') AS media_resource_type,
         json_extract(o.media, '\$.bytes') AS media_bytes,
@@ -128,6 +172,7 @@ class MessagesRepository {
       type: row.read<String>('type'),
       isDeleted: row.read<bool>('is_deleted'),
       createdAt: row.read<DateTime>('created_at'),
+      editedAt: row.read<DateTime?>('edited_at'),
       isPending: row.read<bool>('is_pending'),
       isFailed: row.read<bool>('is_failed'),
       mediaPublicId: row.read<String?>('media_public_id'),

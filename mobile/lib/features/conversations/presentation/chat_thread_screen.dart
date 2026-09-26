@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -6,10 +7,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../../core/realtime/connection_manager.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_avatar.dart';
+import '../data/local_chat_message.dart';
 import '../data/media_repository.dart';
+import '../data/message_action_failure.dart';
 import '../data/messages_repository.dart';
+import 'message_action.dart';
 import 'message_action_sheet.dart';
 import 'message_bubble.dart';
 
@@ -32,6 +37,11 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   final _input = TextEditingController();
   bool _uploading = false;
 
+  /// The message currently being edited (#56), or null while composing a
+  /// new one. Prefilled into [_input] by [_startEdit]; [_send] branches on
+  /// this instead of always sending a new Message.
+  LocalChatMessage? _editing;
+
   @override
   void dispose() {
     _input.dispose();
@@ -39,10 +49,58 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   }
 
   void _send() {
-    if (_input.text.trim().isEmpty) return;
-    final text = _input.text;
+    final text = _input.text.trim();
+    if (text.isEmpty) return;
+    final editing = _editing;
+    if (editing != null) {
+      if (!ensureConnected(context, ref)) return;
+      _input.clear();
+      setState(() => _editing = null);
+      unawaited(_runEdit(editing.id!, text));
+      return;
+    }
     _input.clear();
     ref.read(messagesRepositoryProvider).sendText(widget.conversationId, text);
+  }
+
+  void _startEdit(LocalChatMessage message) {
+    setState(() {
+      _editing = message;
+      _input.text = message.content ?? '';
+      _input.selection = TextSelection.collapsed(offset: _input.text.length);
+    });
+  }
+
+  void _cancelEdit() {
+    setState(() => _editing = null);
+    _input.clear();
+  }
+
+  Future<void> _runEdit(String messageId, String content) async {
+    final socket = ref.read(connectionManagerProvider).socket!;
+    try {
+      await ref
+          .read(messagesRepositoryProvider)
+          .editMessage(socket, messageId: messageId, content: content);
+    } on MessageActionFailure catch (failure) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(messageForMessageActionFailure(failure))));
+    }
+  }
+
+  Future<void> _confirmAndDelete(LocalChatMessage message) async {
+    if (!ensureConnected(context, ref)) return;
+    final confirmed = await confirmDeleteMessage(context);
+    if (!confirmed || !mounted) return;
+    final socket = ref.read(connectionManagerProvider).socket!;
+    try {
+      await ref.read(messagesRepositoryProvider).deleteMessage(socket, messageId: message.id!);
+    } on MessageActionFailure catch (failure) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(messageForMessageActionFailure(failure))));
+    }
   }
 
   Future<void> _attach() async {
@@ -206,13 +264,23 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                           final message = messages[messages.length - 1 - index];
                           return MessageBubble(
                             message: message,
-                            onLongPress: () => showMessageActions(context, message: message),
+                            onLongPress: () => showMessageActions(
+                              context,
+                              message: message,
+                              onEdit: () => _startEdit(message),
+                              onDelete: () => _confirmAndDelete(message),
+                            ),
                           );
                         },
                       ),
               ),
             ),
-            _Composer(controller: _input, onSend: _send, onAttach: _uploading ? null : _attach),
+            _Composer(
+              controller: _input,
+              onSend: _send,
+              onAttach: _uploading ? null : _attach,
+              onCancelEdit: _editing == null ? null : _cancelEdit,
+            ),
           ],
         ),
       ),
@@ -243,7 +311,66 @@ class _EmptyThread extends StatelessWidget {
 }
 
 class _Composer extends StatelessWidget {
-  const _Composer({required this.controller, required this.onSend, required this.onAttach});
+  const _Composer({
+    required this.controller,
+    required this.onSend,
+    required this.onAttach,
+    this.onCancelEdit,
+  });
+
+  final TextEditingController controller;
+  final VoidCallback onSend;
+  final VoidCallback? onAttach;
+
+  /// Non-null while editing a message (#56) — shows a cancel banner above
+  /// the input instead of the plain composer.
+  final VoidCallback? onCancelEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final editing = onCancelEdit != null;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.sm,
+        AppSpacing.sm,
+        AppSpacing.md,
+        AppSpacing.sm,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (editing)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(AppSpacing.sm, 0, 0, AppSpacing.xs),
+              child: Row(
+                children: [
+                  Icon(Icons.edit_outlined, size: 16, color: scheme.primary),
+                  const SizedBox(width: AppSpacing.xs),
+                  Expanded(
+                    child: Text(
+                      'Editing message',
+                      style: TextStyle(color: scheme.primary, fontSize: 12.5),
+                    ),
+                  ),
+                  IconButton(
+                    iconSize: 18,
+                    visualDensity: VisualDensity.compact,
+                    onPressed: onCancelEdit,
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+            ),
+          _ComposerRow(controller: controller, onSend: onSend, onAttach: onAttach),
+        ],
+      ),
+    );
+  }
+}
+
+class _ComposerRow extends StatelessWidget {
+  const _ComposerRow({required this.controller, required this.onSend, required this.onAttach});
 
   final TextEditingController controller;
   final VoidCallback onSend;
@@ -252,44 +379,36 @@ class _Composer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.sm,
-        AppSpacing.sm,
-        AppSpacing.md,
-        AppSpacing.sm,
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          IconButton(onPressed: onAttach, icon: const Icon(Icons.add_circle_outline)),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              minLines: 1,
-              maxLines: 5,
-              textInputAction: TextInputAction.send,
-              onSubmitted: (_) => onSend(),
-              decoration: const InputDecoration(
-                hintText: 'Message',
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: AppSpacing.lg,
-                  vertical: AppSpacing.md,
-                ),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        IconButton(onPressed: onAttach, icon: const Icon(Icons.add_circle_outline)),
+        Expanded(
+          child: TextField(
+            controller: controller,
+            minLines: 1,
+            maxLines: 5,
+            textInputAction: TextInputAction.send,
+            onSubmitted: (_) => onSend(),
+            decoration: const InputDecoration(
+              hintText: 'Message',
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: AppSpacing.lg,
+                vertical: AppSpacing.md,
               ),
             ),
           ),
-          const SizedBox(width: AppSpacing.sm),
-          IconButton.filled(
-            onPressed: onSend,
-            icon: const Icon(Icons.arrow_upward_rounded),
-            style: IconButton.styleFrom(
-              backgroundColor: scheme.primary,
-              foregroundColor: scheme.onPrimary,
-            ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        IconButton.filled(
+          onPressed: onSend,
+          icon: const Icon(Icons.arrow_upward_rounded),
+          style: IconButton.styleFrom(
+            backgroundColor: scheme.primary,
+            foregroundColor: scheme.onPrimary,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
