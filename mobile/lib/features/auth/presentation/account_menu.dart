@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/db/database_provider.dart';
 import '../../../core/formatting/display_name.dart';
 import '../data/auth_repository.dart';
 import 'auth_state.dart';
@@ -9,6 +10,9 @@ import 'auth_state.dart';
 /// out other devices", and "Log out".
 class AccountMenu extends ConsumerWidget {
   const AccountMenu({super.key});
+
+  static const logOutKey = Key('account-menu-log-out');
+  static const confirmLogOutKey = Key('account-menu-confirm-log-out');
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -37,8 +41,9 @@ class AccountMenu extends ConsumerWidget {
           child: const Text('Log out other devices'),
         ),
         MenuItemButton(
+          key: AccountMenu.logOutKey,
           leadingIcon: const Icon(Icons.logout),
-          onPressed: () => ref.read(authStateProvider.notifier).signOut(),
+          onPressed: () => _confirmAndSignOut(context, ref),
           child: const Text('Log out'),
         ),
       ],
@@ -49,6 +54,38 @@ class AccountMenu extends ConsumerWidget {
             controller.isOpen ? controller.close() : controller.open(),
       ),
     );
+  }
+
+  /// "Logout with a non-empty Outbox warns: 'N unsent messages will be
+  /// lost'" (ADR 0009/#54) — asked before [AuthState.signOut] runs, since
+  /// signing out wipes the Outbox along with the rest of the replica.
+  Future<void> _confirmAndSignOut(BuildContext context, WidgetRef ref) async {
+    final pending = await ref.read(appDatabaseProvider).outboxCount();
+    if (!context.mounted) return;
+    if (pending > 0) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Log out?'),
+          content: Text(
+            '$pending unsent message${pending == 1 ? '' : 's'} will be lost.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              key: AccountMenu.confirmLogOutKey,
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Log out'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    await ref.read(authStateProvider.notifier).signOut();
   }
 
   /// This Device stays signed in whatever happens, so the outcome is only

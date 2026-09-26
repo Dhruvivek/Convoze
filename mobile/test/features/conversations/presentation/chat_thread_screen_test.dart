@@ -170,6 +170,67 @@ void main() {
     await _disposeCleanly(tester);
   });
 
+  group('a failed Outbox row (#54)', () {
+    Future<void> seedFailedRow() => db.into(db.outbox).insert(
+      OutboxCompanion.insert(
+        clientMsgId: 'c1',
+        conversationId: conversationId,
+        content: 'oops',
+        status: const Value('failed'),
+        createdAt: DateTime.utc(2026, 1, 1, 10, 2),
+      ),
+    );
+
+    testWidgets('shows "Failed — tap to retry or delete"', (tester) async {
+      await seedConversationWithMessages();
+      await seedFailedRow();
+
+      await tester.pumpWidget(buildScreen());
+      await tester.pumpAndSettle();
+
+      expect(find.text('Failed — tap to retry or delete'), findsOneWidget);
+      expect(find.text('oops'), findsOneWidget);
+
+      await _disposeCleanly(tester);
+    });
+
+    testWidgets('tapping it then Retry puts the row back to pending', (
+      tester,
+    ) async {
+      await seedConversationWithMessages();
+      await seedFailedRow();
+      await tester.pumpWidget(buildScreen());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Failed — tap to retry or delete'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(ChatThreadScreen.retryFailedKey));
+      await tester.pumpAndSettle();
+
+      final row = await db.select(db.outbox).getSingle();
+      expect(row.status, 'pending');
+
+      await _disposeCleanly(tester);
+    });
+
+    testWidgets('tapping it then Delete removes the row', (tester) async {
+      await seedConversationWithMessages();
+      await seedFailedRow();
+      await tester.pumpWidget(buildScreen());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Failed — tap to retry or delete'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(ChatThreadScreen.discardFailedKey));
+      await tester.pumpAndSettle();
+
+      expect(await db.select(db.outbox).get(), isEmpty);
+      expect(find.text('oops'), findsNothing);
+
+      await _disposeCleanly(tester);
+    });
+  });
+
   testWidgets('shows "Beginning of conversation" once an empty chat has been fetched', (
     tester,
   ) async {

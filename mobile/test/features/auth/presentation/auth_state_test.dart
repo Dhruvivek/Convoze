@@ -1,10 +1,13 @@
 import 'dart:async';
 
+import 'package:convoze/core/db/database.dart';
+import 'package:convoze/core/db/database_provider.dart';
 import 'package:convoze/core/models/user.dart';
 import 'package:convoze/core/storage/token_store.dart';
 import 'package:convoze/features/auth/data/auth_failure.dart';
 import 'package:convoze/features/auth/data/auth_repository.dart';
 import 'package:convoze/features/auth/presentation/auth_state.dart';
+import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -52,6 +55,9 @@ ProviderContainer _container({
       authRepositoryProvider.overrideWithValue(
         repository ?? _FakeAuthRepository(),
       ),
+      // In memory: signOut() wipes the replica (#54) — never touch real
+      // disk here.
+      appDatabaseProvider.overrideWithValue(AppDatabase(NativeDatabase.memory())),
     ],
   );
   addTearDown(container.dispose);

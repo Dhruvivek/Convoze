@@ -12,12 +12,17 @@ class MessageList extends StatelessWidget {
     required this.scrollController,
     required this.isLoadingOlder,
     required this.reachedStart,
+    this.onTapFailed,
   });
 
   final List<ChatMessageView> views;
   final ScrollController scrollController;
   final bool isLoadingOlder;
   final bool reachedStart;
+
+  /// Called with a failed Outbox row's `clientMsgId` when its bubble is
+  /// tapped ("failed — tap to retry or delete", ADR 0009).
+  final void Function(String clientMsgId)? onTapFailed;
 
   @override
   Widget build(BuildContext context) {
@@ -43,7 +48,7 @@ class MessageList extends StatelessWidget {
         final row = rows[rows.length - 1 - index];
         return switch (row) {
           _DateRow(:final day) => _DateSeparator(day: day),
-          _MessageRow(:final view) => _MessageBubble(view: view),
+          _MessageRow(:final view) => _MessageBubble(view: view, onTapFailed: onTapFailed),
         };
       },
     );
@@ -172,67 +177,85 @@ String _timeLabel(DateTime utc) {
 }
 
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.view});
+  const _MessageBubble({required this.view, this.onTapFailed});
 
   final ChatMessageView view;
+  final void Function(String clientMsgId)? onTapFailed;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final mine = view.fromMe;
+    final failed = view.tick == MessageTick.failed;
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: MediaQuery.of(context).size.width * 0.78,
         ),
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 2),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: view.isDeleted
-                ? scheme.surfaceContainerHighest.withValues(alpha: 0.5)
-                : mine
-                ? scheme.primary
-                : scheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                view.isDeleted
-                    ? 'This message was deleted'
-                    : (view.content ?? ''),
-                style: TextStyle(
-                  color: view.isDeleted
-                      ? scheme.onSurfaceVariant
-                      : mine
-                      ? scheme.onPrimary
-                      : scheme.onSurfaceVariant,
-                  fontStyle: view.isDeleted ? FontStyle.italic : FontStyle.normal,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _timeLabel(view.createdAt),
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: mine
-                          ? scheme.onPrimary.withValues(alpha: 0.7)
-                          : scheme.onSurfaceVariant,
-                    ),
+        child: GestureDetector(
+          onTap: failed && view.clientMsgId != null
+              ? () => onTapFailed?.call(view.clientMsgId!)
+              : null,
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: view.isDeleted
+                  ? scheme.surfaceContainerHighest.withValues(alpha: 0.5)
+                  : mine
+                  ? scheme.primary
+                  : scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  view.isDeleted
+                      ? 'This message was deleted'
+                      : (view.content ?? ''),
+                  style: TextStyle(
+                    color: view.isDeleted
+                        ? scheme.onSurfaceVariant
+                        : mine
+                        ? scheme.onPrimary
+                        : scheme.onSurfaceVariant,
+                    fontStyle: view.isDeleted ? FontStyle.italic : FontStyle.normal,
                   ),
-                  if (view.tick != null) ...[
-                    const SizedBox(width: 4),
-                    _TickIcon(tick: view.tick!, onPrimary: mine),
-                  ],
-                ],
-              ),
-            ],
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: failed
+                      ? [
+                          Text(
+                            'Failed — tap to retry or delete',
+                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: scheme.error,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          _TickIcon(tick: MessageTick.failed, onPrimary: mine),
+                        ]
+                      : [
+                          Text(
+                            _timeLabel(view.createdAt),
+                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: mine
+                                  ? scheme.onPrimary.withValues(alpha: 0.7)
+                                  : scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          if (view.tick != null) ...[
+                            const SizedBox(width: 4),
+                            _TickIcon(tick: view.tick!, onPrimary: mine),
+                          ],
+                        ],
+                ),
+              ],
+            ),
           ),
         ),
       ),

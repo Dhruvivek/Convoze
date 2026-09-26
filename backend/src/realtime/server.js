@@ -16,7 +16,14 @@ export const conversationRoom = (conversationId) => `conversation:${conversation
 // The Socket.IO server, not yet attached to an HTTP server. Every socket is
 // authenticated at its handshake and joined to its rooms by the server;
 // clients can't join or leave rooms themselves (ADR 0005).
-export function createRealtime({ prisma, authenticate, clock, sessionRevoked, pumpOptions = {} }) {
+export function createRealtime({
+  prisma,
+  authenticate,
+  clock,
+  sessionRevoked,
+  pumpOptions = {},
+  faults,
+}) {
   // The only client is the app, so no HTTP long-polling fallback.
   const io = new Server({ transports: ['websocket'] });
   const registry = createConnectionRegistry();
@@ -120,8 +127,17 @@ export function createRealtime({ prisma, authenticate, clock, sessionRevoked, pu
     addPump(userId, pump);
     pump.wake();
 
-    function handle(action) {
+    function handle(action, event) {
       return async (payload, callback) => {
+        // e2e fault injection (#54): consumed, and acked, before the real
+        // handler ever runs — so an injected `INVALID`/`RATE_LIMITED` behaves
+        // exactly like the real guard rejecting it, and a faulted call has no
+        // other side effect (no message row, no rate-limit slot spent).
+        const injectedCode = faults?.consumeEvent(event);
+        if (injectedCode) {
+          callback?.({ ok: false, code: injectedCode });
+          return;
+        }
         try {
           const result = await action(userId, payload);
           callback?.(result);
@@ -138,11 +154,11 @@ export function createRealtime({ prisma, authenticate, clock, sessionRevoked, pu
       };
     }
 
-    socket.on('message:send', handle(sendMessage));
-    socket.on('message:edit', handle(editMessage));
-    socket.on('message:delete', handle(deleteMessage));
-    socket.on('reaction:toggle', handle(toggleReaction));
-    socket.on('conversation:read', handle(markRead));
+    socket.on('message:send', handle(sendMessage, 'message:send'));
+    socket.on('message:edit', handle(editMessage, 'message:edit'));
+    socket.on('message:delete', handle(deleteMessage, 'message:delete'));
+    socket.on('reaction:toggle', handle(toggleReaction, 'reaction:toggle'));
+    socket.on('conversation:read', handle(markRead, 'conversation:read'));
 
     socket.on('disconnect', () => {
       pump.stop();

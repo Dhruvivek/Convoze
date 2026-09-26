@@ -54,6 +54,40 @@ Future<void> _flush() async {
   await Future<void>.delayed(Duration.zero);
 }
 
+/// Builds a [ConnectionManager] wired to this suite's fakes. Factored out so
+/// a test can build its own instance with a different [backgroundGrace] than
+/// the shared `setUp` one — needed to make "drained before the cap" and "the
+/// cap elapsed" observably different in timing (#54).
+ConnectionManager _buildManager({
+  required Duration backgroundGrace,
+  required List<_TestSocket> sockets,
+  required TokenStore tokenStore,
+  required FakeBackend backend,
+  required void Function() onSessionEnded,
+  required Future<int?> Function() readSyncCursor,
+  required void Function(io.Socket) onSocketCreated,
+  required Future<bool> Function() isOutboxEmpty,
+}) => ConnectionManager(
+  createSocket: () {
+    final socket = _TestSocket(
+      Manager(uri: 'http://fake', options: {'autoConnect': false}),
+    );
+    sockets.add(socket);
+    return socket;
+  },
+  tokenStore: tokenStore,
+  sessionRefresher: SessionRefresher(
+    refreshDio: Dio()..httpClientAdapter = backend,
+    tokenStore: tokenStore,
+    onSessionEnded: onSessionEnded,
+  ),
+  onSessionEnded: onSessionEnded,
+  readSyncCursor: readSyncCursor,
+  onSocketCreated: onSocketCreated,
+  isOutboxEmpty: isOutboxEmpty,
+  backgroundGrace: backgroundGrace,
+);
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -64,6 +98,7 @@ void main() {
   late ConnectionManager manager;
   late int? syncCursor;
   late List<io.Socket> attachedSockets;
+  late bool outboxEmpty;
 
   setUp(() async {
     FlutterSecureStorage.setMockInitialValues({
@@ -75,24 +110,18 @@ void main() {
     sessionEndedCalls = 0;
     syncCursor = null;
     attachedSockets = [];
+    outboxEmpty = true;
     tokenStore = TokenStore(const FlutterSecureStorage());
-    manager = ConnectionManager(
-      createSocket: () {
-        final socket = _TestSocket(
-          Manager(uri: 'http://fake', options: {'autoConnect': false}),
-        );
-        sockets.add(socket);
-        return socket;
-      },
+    manager = _buildManager(
+      // Fast in tests; #54's own group below exercises the cap itself.
+      backgroundGrace: const Duration(milliseconds: 50),
+      sockets: sockets,
       tokenStore: tokenStore,
-      sessionRefresher: SessionRefresher(
-        refreshDio: Dio()..httpClientAdapter = backend,
-        tokenStore: tokenStore,
-        onSessionEnded: () => sessionEndedCalls++,
-      ),
+      backend: backend,
       onSessionEnded: () => sessionEndedCalls++,
       readSyncCursor: () async => syncCursor,
       onSocketCreated: attachedSockets.add,
+      isOutboxEmpty: () async => outboxEmpty,
     );
   });
 
@@ -190,7 +219,8 @@ void main() {
   );
 
   group('app lifecycle', () {
-    test('paused, hidden and detached disconnect while authenticated', () {
+    test('paused, hidden and detached disconnect while authenticated '
+        '(Outbox already empty)', () async {
       for (final state in [
         AppLifecycleState.paused,
         AppLifecycleState.hidden,
@@ -200,15 +230,17 @@ void main() {
         expect(manager.status, isNot(ConnectionStatus.offline));
 
         manager.didChangeAppLifecycleState(state);
+        await pumpEventQueue();
 
         expect(manager.status, ConnectionStatus.offline);
         manager.setAuthenticated(false);
       }
     });
 
-    test('resumed reconnects while authenticated', () {
+    test('resumed reconnects while authenticated', () async {
       manager.setAuthenticated(true);
       manager.didChangeAppLifecycleState(AppLifecycleState.paused);
+      await pumpEventQueue();
       expect(manager.status, ConnectionStatus.offline);
 
       manager.didChangeAppLifecycleState(AppLifecycleState.resumed);
@@ -225,12 +257,81 @@ void main() {
       expect(manager.status, statusBefore);
     });
 
-    test('lifecycle changes do nothing while signed out', () {
+    test('lifecycle changes do nothing while signed out', () async {
       manager.didChangeAppLifecycleState(AppLifecycleState.resumed);
       expect(manager.status, ConnectionStatus.offline);
 
       manager.didChangeAppLifecycleState(AppLifecycleState.paused);
+      await pumpEventQueue();
       expect(manager.status, ConnectionStatus.offline);
+    });
+  });
+
+  group('background grace (#54)', () {
+    test('a non-empty Outbox holds the disconnect open until it drains', () async {
+      // A cap (5s) generous enough that disconnecting well before it (once
+      // the Outbox empties, within one ~200ms poll) is only explainable by
+      // the early-drain path — not distinguishable from "the cap elapsed"
+      // with this suite's other, much shorter `backgroundGrace`.
+      final graceManager = _buildManager(
+        backgroundGrace: const Duration(seconds: 5),
+        sockets: sockets,
+        tokenStore: tokenStore,
+        backend: backend,
+        onSessionEnded: () => sessionEndedCalls++,
+        readSyncCursor: () async => syncCursor,
+        onSocketCreated: attachedSockets.add,
+        isOutboxEmpty: () async => outboxEmpty,
+      );
+      addTearDown(graceManager.dispose);
+
+      graceManager.setAuthenticated(true);
+      outboxEmpty = false;
+
+      graceManager.didChangeAppLifecycleState(AppLifecycleState.paused);
+      await pumpEventQueue();
+      expect(
+        graceManager.status,
+        isNot(ConnectionStatus.offline),
+        reason: 'still draining, must not have disconnected yet',
+      );
+
+      outboxEmpty = true;
+      // One poll interval (200ms) for the grace loop to notice — nowhere
+      // near the 5s cap, so this can only be the early-drain path.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+
+      expect(graceManager.status, ConnectionStatus.offline);
+    });
+
+    test('a permanently non-empty Outbox disconnects once the cap elapses', () async {
+      manager.setAuthenticated(true);
+      outboxEmpty = false;
+
+      manager.didChangeAppLifecycleState(AppLifecycleState.paused);
+      await pumpEventQueue();
+      expect(manager.status, isNot(ConnectionStatus.offline));
+
+      // backgroundGrace is 50ms in this suite's setup.
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+
+      expect(manager.status, ConnectionStatus.offline);
+    });
+
+    test('foregrounding again before the grace ends cancels the disconnect', () async {
+      manager.setAuthenticated(true);
+      outboxEmpty = false;
+
+      manager.didChangeAppLifecycleState(AppLifecycleState.paused);
+      await pumpEventQueue();
+      expect(manager.status, isNot(ConnectionStatus.offline));
+
+      manager.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      // Long enough that the superseded grace wait would otherwise have
+      // disconnected by now.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      expect(manager.status, isNot(ConnectionStatus.offline));
     });
   });
 

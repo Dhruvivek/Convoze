@@ -54,6 +54,31 @@ export function createE2eRouter({
     res.status(204).end();
   });
 
+  // Rejects the next `count` calls to socket `event` (`message:send`,
+  // `message:edit`, ...) with `{ ok: false, code }`, the same shape a real
+  // guard rejection acks (#54's Outbox retry/failed e2e coverage).
+  router.post('/socket-faults', (req, res) => {
+    const { event, count, code } = req.body ?? {};
+    const valid =
+      typeof event === 'string' &&
+      event.length > 0 &&
+      Number.isInteger(count) &&
+      count > 0 &&
+      typeof code === 'string' &&
+      code.length > 0;
+    if (!valid) {
+      sendError(
+        res,
+        400,
+        'invalid_request',
+        'Expected { event, count > 0, code: string }',
+      );
+      return;
+    }
+    faults.injectEvent(event, count, { code });
+    res.status(204).end();
+  });
+
   // Shortens token lifetimes until the next reset, so expiry can be tested
   // in seconds.
   router.post('/token-ttls', (req, res) => {

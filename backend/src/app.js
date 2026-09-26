@@ -32,10 +32,12 @@ export function createApp({
   const tokenTtls = createTokenTtls();
   const authenticate = createAuthenticator({ prisma, jwtSecret, clock });
   const authenticated = requireAuth(authenticate);
-  const realtime = createRealtime({ prisma, authenticate, clock, sessionRevoked, pumpOptions });
+  // Created ahead of `realtime` so its socket-event fault injection (#54) is
+  // wired in from the first connection, not just once the e2e router mounts.
+  const faults = e2eMode ? createFaultInjector() : undefined;
+  const realtime = createRealtime({ prisma, authenticate, clock, sessionRevoked, pumpOptions, faults });
 
   if (e2eMode) {
-    const faults = createFaultInjector();
     const refreshCounter = createRefreshCounter();
     // The router goes first so a fault can never break the test-only endpoints.
     app.use(

@@ -116,8 +116,32 @@ class MessagesRepository {
             createdAt: DateTime.now().toUtc(),
           ),
         );
+    _kickDrainIfConnected();
+  }
+
+  /// Puts a `failed` Outbox row ("failed — tap to retry or delete", ADR
+  /// 0009) back to `pending` and, if connected, kicks the drainer right away
+  /// rather than waiting for the next reconnect. A no-op if the row is
+  /// already gone (sent meanwhile, or already discarded).
+  Future<void> retry(String clientMsgId) async {
+    await (db.update(db.outbox)..where((t) => t.clientMsgId.equals(clientMsgId)))
+        .write(const OutboxCompanion(status: Value('pending')));
+    _kickDrainIfConnected();
+  }
+
+  /// Kicks the drainer right away rather than waiting for the next
+  /// reconnect/catch-up, if there's a socket to kick it on.
+  void _kickDrainIfConnected() {
     final socket = currentSocket();
     if (socket != null) unawaited(syncEngine.drainOutbox(socket));
+  }
+
+  /// Deletes a `failed` Outbox row for good, per the user's "delete" choice
+  /// (ADR 0009).
+  Future<void> discard(String clientMsgId) {
+    return (db.delete(
+      db.outbox,
+    )..where((t) => t.clientMsgId.equals(clientMsgId))).go();
   }
 
   /// Moves the local read watermark to the newest local Message at once,

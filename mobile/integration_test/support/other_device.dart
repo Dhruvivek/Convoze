@@ -123,6 +123,20 @@ class OtherDevice {
     return connected.future.timeout(const Duration(seconds: 5));
   }
 
+  /// Emits [event] on [socket] with [payload], waits for its ack (the
+  /// library's default timeout unless [timeoutMs] says otherwise), and
+  /// answers it decoded — every one of this Device's commands acks
+  /// `{ok, ...}` / `{ok: false, code}` the same way.
+  Future<Map<String, dynamic>> _ack(
+    io.Socket socket,
+    String event,
+    Map<String, dynamic> payload, {
+    int timeoutMs = 5000,
+  }) async {
+    final res = await socket.timeout(timeoutMs).emitWithAckAsync(event, payload);
+    return (res as Map).cast<String, dynamic>();
+  }
+
   /// Sends a Message on [socket] (from [connectSocket]) via `message:send`,
   /// waiting for its ack, and answers the server's response
   /// (`sendMessage.js`'s `{ok, messageId, createdAt}` / `{ok: false, code}`).
@@ -130,14 +144,42 @@ class OtherDevice {
     io.Socket socket, {
     required String conversationId,
     String content = 'hi',
-  }) async {
-    final res = await socket.timeout(5000).emitWithAckAsync('message:send', {
-      'clientMsgId': const Uuid().v4(),
-      'conversationId': conversationId,
-      'content': content,
-    });
-    return (res as Map).cast<String, dynamic>();
-  }
+  }) => _ack(socket, 'message:send', {
+    'clientMsgId': const Uuid().v4(),
+    'conversationId': conversationId,
+    'content': content,
+  });
+
+  /// `message:edit` on [socket] (#54): sender-only, text messages only.
+  Future<Map<String, dynamic>> editMessage(
+    io.Socket socket, {
+    required String messageId,
+    required String content,
+  }) => _ack(socket, 'message:edit', {'messageId': messageId, 'content': content});
+
+  /// `message:delete` on [socket] (#54): sender-only soft delete.
+  Future<Map<String, dynamic>> deleteMessage(
+    io.Socket socket, {
+    required String messageId,
+  }) => _ack(socket, 'message:delete', {'messageId': messageId});
+
+  /// `reaction:toggle` on [socket] (#54): adds if absent, removes if present.
+  Future<Map<String, dynamic>> toggleReaction(
+    io.Socket socket, {
+    required String messageId,
+    required String emoji,
+  }) => _ack(socket, 'reaction:toggle', {'messageId': messageId, 'emoji': emoji});
+
+  /// `conversation:read` on [socket] (#54): moves this Device's read (and
+  /// delivery) watermark forward.
+  Future<Map<String, dynamic>> markRead(
+    io.Socket socket, {
+    required String conversationId,
+    required String messageId,
+  }) => _ack(socket, 'conversation:read', {
+    'conversationId': conversationId,
+    'messageId': messageId,
+  });
 
   /// Closes every connection this Device opened.
   void dispose() {
@@ -167,4 +209,27 @@ Future<dynamic> nextEvent(
   return received.future
       .timeout(timeout)
       .whenComplete(() => socket.off(event, handler));
+}
+
+/// Listens for every `sync:batch` on [socket] (from [OtherDevice.connectSocket]),
+/// calling [onBatch] with each decoded payload (#54). Acks with the batch's
+/// highest `seq` unless [ack] is false — for a test that needs to hold a
+/// batch open on purpose (a Device not acking a delivery, say) rather than
+/// the drainer's normal path.
+void listenForBatches(
+  io.Socket socket,
+  void Function(Map<String, dynamic> payload) onBatch, {
+  bool ack = true,
+}) {
+  socket.on('sync:batch', (args) {
+    final list = args as List;
+    final payload = (list[0] as Map).cast<String, dynamic>();
+    if (ack) {
+      final ackFn = list[1] as Function;
+      final updates = (payload['updates'] as List).cast<Map>();
+      final highestSeq = updates.map((u) => u['seq'] as int).reduce((a, b) => a > b ? a : b);
+      ackFn(highestSeq);
+    }
+    onBatch(payload);
+  });
 }
