@@ -129,7 +129,7 @@ class SettingsScreen extends ConsumerWidget {
               const SizedBox(height: AppSpacing.lg),
               const _HelpItem(
                 question: 'How do I start a conversation?',
-                answer: 'Tap the compose button on Chats, or pick someone from the Contacts tab.',
+                answer: 'Tap the compose button on Chats and pick someone to message.',
               ),
               const _HelpItem(
                 question: "I didn't get my verification code",

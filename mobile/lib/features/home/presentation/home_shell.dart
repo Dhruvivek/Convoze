@@ -3,15 +3,14 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/widgets/connecting_banner.dart';
 import '../../auth/presentation/logout_menu.dart';
-import '../../conversations/presentation/contacts_tab.dart';
 import '../../conversations/presentation/conversations_screen.dart';
 import '../../profile/presentation/profile_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
 
-/// The signed-in app shell: bottom navigation across Chats, Contacts,
-/// Profile, and Settings, under one shared app bar (a constant "Convoze"
-/// title; the overflow menu and — on Chats only — search and the compose
-/// FAB live here too).
+/// The signed-in app shell: bottom navigation across Chats, Profile, and
+/// Settings, under one shared app bar (a constant "Convoze" title; the
+/// overflow menu and — on Chats only — search and the compose FAB live
+/// here too).
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -22,7 +21,7 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
-  void _openProfileTab() => setState(() => _index = 2);
+  void _openProfileTab() => setState(() => _index = 1);
 
   @override
   Widget build(BuildContext context) {
@@ -48,7 +47,6 @@ class _HomeShellState extends State<HomeShell> {
               index: _index,
               children: [
                 const ConversationsTabBody(),
-                const ContactsTab(),
                 const ProfileScreen(embedded: true),
                 SettingsScreen(embedded: true, onOpenProfile: _openProfileTab),
               ],
@@ -71,11 +69,6 @@ class _HomeShellState extends State<HomeShell> {
             icon: Icon(Icons.chat_bubble_outline),
             selectedIcon: Icon(Icons.chat_bubble),
             label: 'Chats',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.people_outline),
-            selectedIcon: Icon(Icons.people),
-            label: 'Contacts',
           ),
           NavigationDestination(
             icon: Icon(Icons.person_outline),
