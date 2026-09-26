@@ -217,19 +217,23 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     final path = picked.isEmpty ? null : picked.single.path;
     if (path == null || !mounted) return;
     final fileName = picked.single.name;
+    final extension = picked.single.extension;
     final caption = await _promptCaption();
     if (!mounted) return;
-    await _upload(() => ref.read(mediaRepositoryProvider).uploadDocument(File(path)), (upload) {
-      return ref
-          .read(messagesRepositoryProvider)
-          .sendMedia(
-            widget.conversationId,
-            kind: MediaKind.file,
-            upload: upload,
-            fileName: fileName,
-            caption: caption,
-          );
-    });
+    await _upload(
+      () => ref.read(mediaRepositoryProvider).uploadDocument(File(path), extension: extension),
+      (upload) {
+        return ref
+            .read(messagesRepositoryProvider)
+            .sendMedia(
+              widget.conversationId,
+              kind: MediaKind.file,
+              upload: upload,
+              fileName: fileName,
+              caption: caption,
+            );
+      },
+    );
   }
 
   /// An optional caption, collected right after picking and before

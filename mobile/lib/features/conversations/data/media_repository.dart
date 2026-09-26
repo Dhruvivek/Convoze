@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:dio/dio.dart';
-import 'package:path/path.dart' as p;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../core/network/dio_provider.dart';
@@ -25,9 +24,7 @@ class CloudinaryUploadResult {
 
   /// `fallbackFormat` covers Cloudinary's `raw` (document) uploads, whose
   /// response never includes a `format` field the way `image` uploads do —
-  /// confirmed directly against the real API, not assumed. The caller
-  /// passes the picked file's own extension, which the file picker already
-  /// constrained to `MEDIA_LIMITS.file.formats`.
+  /// confirmed directly against the real API, not assumed.
   factory CloudinaryUploadResult.fromResponse(Map<String, dynamic> json, {String? fallbackFormat}) =>
       CloudinaryUploadResult(
         publicId: json['public_id'] as String,
@@ -74,9 +71,18 @@ class MediaRepository {
 
   Future<CloudinaryUploadResult> uploadImage(File file) => _upload(file, kind: 'image');
 
-  Future<CloudinaryUploadResult> uploadDocument(File file) => _upload(file, kind: 'file');
+  /// `extension` should come from the file picker's own `PlatformFile.extension`
+  /// (derived from the picked file's *name*), not from `file.path` — on
+  /// Android, `path` can be a content-resolver cache path with no extension
+  /// even when `name` reliably has one.
+  Future<CloudinaryUploadResult> uploadDocument(File file, {String? extension}) =>
+      _upload(file, kind: 'file', fallbackFormat: extension?.toLowerCase());
 
-  Future<CloudinaryUploadResult> _upload(File file, {required String kind}) async {
+  Future<CloudinaryUploadResult> _upload(
+    File file, {
+    required String kind,
+    String? fallbackFormat,
+  }) async {
     final signatureRes = await _dio.post<Map<String, dynamic>>(
       '/media/upload-signature',
       data: {'kind': kind},
@@ -98,11 +104,7 @@ class MediaRepository {
         'file': await MultipartFile.fromFile(file.path),
       }),
     );
-    final extension = p.extension(file.path).replaceFirst('.', '').toLowerCase();
-    return CloudinaryUploadResult.fromResponse(
-      response.data!,
-      fallbackFormat: extension.isEmpty ? null : extension,
-    );
+    return CloudinaryUploadResult.fromResponse(response.data!, fallbackFormat: fallbackFormat);
   }
 }
 
