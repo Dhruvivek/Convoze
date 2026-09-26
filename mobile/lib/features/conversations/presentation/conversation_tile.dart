@@ -91,7 +91,13 @@ class ConversationTile extends StatelessWidget {
                             const SizedBox(width: AppSpacing.sm),
                             Text(
                               relativeTime(item.lastMessageAt!),
-                              style: theme.textTheme.labelMedium,
+                              // Accent the timestamp on unread rows so it reads
+                              // as a signal, not just flat metadata gray.
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: unread
+                                    ? theme.colorScheme.primary
+                                    : theme.colorScheme.onSurfaceVariant,
+                              ),
                             ),
                           ],
                         ],

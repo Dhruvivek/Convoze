@@ -41,12 +41,16 @@ class AppAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = _color;
+    // The palette is fixed, but a flat 16% tint reads muddy on a dark
+    // surface — richer background + a lightened glyph keep it vivid there.
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final foreground = isDark ? Color.lerp(color, Colors.white, 0.35)! : color;
     return CircleAvatar(
       radius: size / 2,
-      backgroundColor: color.withValues(alpha: 0.16),
+      backgroundColor: color.withValues(alpha: isDark ? 0.28 : 0.16),
       child: Text(
         _initials,
-        style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: size * 0.38),
+        style: TextStyle(color: foreground, fontWeight: FontWeight.w700, fontSize: size * 0.38),
       ),
     );
   }
