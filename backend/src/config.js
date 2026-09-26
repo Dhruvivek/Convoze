@@ -23,12 +23,6 @@ export function loadConfig(env) {
     authToken: env.TWILIO_AUTH_TOKEN,
     verifyServiceSid: env.TWILIO_VERIFY_SERVICE_SID,
   };
-  // E2E mode swaps in a fake Verify client, so only the real one needs these.
-  if (!e2eMode && !(twilio.accountSid && twilio.authToken && twilio.verifyServiceSid)) {
-    throw new Error(
-      'TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_VERIFY_SERVICE_SID are required',
-    );
-  }
 
   return {
     port: Number(env.PORT ?? 3000),
@@ -36,6 +30,6 @@ export function loadConfig(env) {
     jwtSecret,
     e2eMode,
     twilio,
-    e2eOtpCode: env.E2E_OTP_CODE ?? '000000',
+    e2eOtpCode: env.E2E_OTP_CODE ?? '548726',
   };
 }

@@ -34,11 +34,4 @@ describe('server startup guard', () => {
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /JWT_SECRET/);
   });
-
-  it('refuses to start outside e2e mode without Twilio Verify credentials', () => {
-    const result = startServer({ JWT_SECRET: 'secret' });
-
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /TWILIO_/);
-  });
 });

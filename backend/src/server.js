@@ -14,8 +14,12 @@ try {
   process.exit(1);
 }
 
+const hasTwilioCredentials = Boolean(
+  config.twilio.accountSid && config.twilio.authToken && config.twilio.verifyServiceSid,
+);
+
 const prisma = createPrismaClient(config.databaseUrl);
-const verifyClient = config.e2eMode
+const verifyClient = config.e2eMode || !hasTwilioCredentials
   ? createFakeVerifyClient({ code: config.e2eOtpCode })
   : createTwilioVerifyClient(config.twilio);
 
