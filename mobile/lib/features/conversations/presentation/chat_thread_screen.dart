@@ -12,7 +12,6 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_avatar.dart';
 import '../data/local_chat_message.dart';
 import '../data/media_repository.dart';
-import '../data/message_action_failure.dart';
 import '../data/messages_repository.dart';
 import 'message_action.dart';
 import 'message_action_sheet.dart';
@@ -53,17 +52,29 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     if (text.isEmpty) return;
     final editing = _editing;
     if (editing != null) {
-      if (!ensureConnected(context, ref)) return;
       _input.clear();
       setState(() => _editing = null);
-      unawaited(_runEdit(editing.id!, text));
+      final socket = ref.read(connectionManagerProvider).socket!;
+      unawaited(
+        runMessageAction(
+          context,
+          () => ref
+              .read(messagesRepositoryProvider)
+              .editMessage(socket, messageId: editing.id!, content: text),
+        ),
+      );
       return;
     }
     _input.clear();
     ref.read(messagesRepositoryProvider).sendText(widget.conversationId, text);
   }
 
+  /// Enters edit mode for [message], refusing up front while disconnected
+  /// (#56) — the same gating point [_confirmAndDelete] checks before its
+  /// confirm dialog, since there's nothing useful to compose an edit for
+  /// without a connection to send it over.
   void _startEdit(LocalChatMessage message) {
+    if (!ensureConnected(context, ref)) return;
     setState(() {
       _editing = message;
       _input.text = message.content ?? '';
@@ -76,31 +87,15 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     _input.clear();
   }
 
-  Future<void> _runEdit(String messageId, String content) async {
-    final socket = ref.read(connectionManagerProvider).socket!;
-    try {
-      await ref
-          .read(messagesRepositoryProvider)
-          .editMessage(socket, messageId: messageId, content: content);
-    } on MessageActionFailure catch (failure) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(messageForMessageActionFailure(failure))));
-    }
-  }
-
   Future<void> _confirmAndDelete(LocalChatMessage message) async {
     if (!ensureConnected(context, ref)) return;
     final confirmed = await confirmDeleteMessage(context);
     if (!confirmed || !mounted) return;
     final socket = ref.read(connectionManagerProvider).socket!;
-    try {
-      await ref.read(messagesRepositoryProvider).deleteMessage(socket, messageId: message.id!);
-    } on MessageActionFailure catch (failure) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(messageForMessageActionFailure(failure))));
-    }
+    await runMessageAction(
+      context,
+      () => ref.read(messagesRepositoryProvider).deleteMessage(socket, messageId: message.id!),
+    );
   }
 
   Future<void> _attach() async {

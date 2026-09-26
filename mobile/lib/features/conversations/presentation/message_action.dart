@@ -49,3 +49,16 @@ String messageForMessageActionFailure(MessageActionFailure failure) => switch (f
   MessageActionNetworkFailure() => 'Needs a connection. Try again.',
   UnexpectedMessageActionFailure() => 'Something went wrong. Try again.',
 };
+
+/// Runs an edit/delete [action], mapping any [MessageActionFailure] it
+/// throws to a snackbar. The connectivity gate itself is separate
+/// ([ensureConnected]) — callers check that up front, before this runs.
+Future<void> runMessageAction(BuildContext context, Future<void> Function() action) async {
+  try {
+    await action();
+  } on MessageActionFailure catch (failure) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(messageForMessageActionFailure(failure))));
+  }
+}
