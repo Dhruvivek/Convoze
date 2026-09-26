@@ -3,7 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import 'contact_picker_list.dart';
 
-/// The Contacts tab: browse mock contacts, tap one to open a chat.
+/// The Contacts tab: browse everyone else on Convoze, tap one to open a chat.
 class ContactsTab extends StatelessWidget {
   const ContactsTab({super.key});
 
