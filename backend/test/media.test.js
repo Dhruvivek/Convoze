@@ -72,13 +72,7 @@ describe('media sharing (#40, photos & documents)', () => {
     assert.equal(res.status, 400);
   });
 
-  // Skipped: `backend/.env`'s CLOUDINARY_* credentials don't work against
-  // the real Cloudinary API (`cloudinary.api.ping()` returns 401 "cloud_name
-  // mismatch" — confirmed directly, not a bug in this code). Every other
-  // test in this file is real-network-free and passes; this is the one
-  // genuinely-integration test that needs a working account. Un-skip once
-  // real credentials are in place.
-  it.skip('sends and hydrates a real photo end to end through Cloudinary', async () => {
+  it('sends and hydrates a real photo end to end through Cloudinary', async () => {
     const { app, realtime } = buildTestApp({ prisma });
     const alice = await signIn(app, { phoneNumber: ALICE });
     const bob = await signIn(app, { phoneNumber: BOB });
@@ -135,6 +129,15 @@ describe('media sharing (#40, photos & documents)', () => {
     assert.equal(payload.mediaPublicId, publicId);
     assert.ok(payload.mediaUrl.startsWith('https://'));
     assert.ok(payload.mediaThumbnailUrl.includes('w_480'));
+
+    // Not just a string-shape check: the delivery URL must actually resolve.
+    // A signed `authenticated` URL can look right and still 401 (e.g. a
+    // stray `auth_token` param on an account without token-based auth
+    // enabled), which a shape-only assertion would never catch.
+    const deliveryRes = await fetch(payload.mediaUrl);
+    assert.equal(deliveryRes.status, 200);
+    const thumbRes = await fetch(payload.mediaThumbnailUrl);
+    assert.equal(thumbRes.status, 200);
   });
 
   it('rejects a media message whose response signature is forged', async () => {

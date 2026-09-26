@@ -36,8 +36,6 @@ export const MEDIA_LIMITS = {
   file: { resourceType: 'raw', maxBytes: 25 * 1024 * 1024, formats: ['pdf', 'doc', 'docx', 'zip', 'txt'] },
 };
 
-const AUTH_TOKEN_DURATION_SECONDS = 60 * 60;
-
 /// A short-lived, signed upload request for `kind` ('image' | 'file'). The
 /// server picks `publicId` as `u/<userId>/<uuid>`, so every asset lives in
 /// its uploader's own folder — `sendMessage.js` checks that prefix as proof
@@ -73,27 +71,25 @@ export function verifyUploadResponse({ publicId, version, signature }) {
   return cloudinary.utils.verify_api_response_signature(publicId, version, signature);
 }
 
-/// Signed `authenticated` delivery URLs for `publicId`, valid ~1 hour
-/// (ADR 0002) — never persisted, always signed fresh at read time. A
-/// `resourceType: 'raw'` (document) asset has no thumbnail concept, so
-/// `thumbnailUrl` is the same as `url`.
+/// Signed `authenticated` delivery URLs for `publicId` — never persisted,
+/// always signed fresh at read time. A `resourceType: 'raw'` (document)
+/// asset has no thumbnail concept, so `thumbnailUrl` is the same as `url`.
 ///
-/// Note on the ~1h expiry: it's enforced via `auth_token`, which only
-/// actually 403s past its `duration` if this Cloudinary account has
-/// "Token-based authentication" enabled with a matching key in its
-/// dashboard security settings — that's an account setting, not something
-/// this code can turn on. Without it, the URL still requires the API
-/// secret to construct (via `sign_url`), so it isn't guessable; it just
-/// doesn't hard-expire. Documented here rather than assumed.
+/// ADR 0002 called for these to hard-expire after ~1h via `auth_token`, but
+/// that only actually 403s past its `duration` if this Cloudinary account
+/// has "Token-based authentication" enabled in its dashboard security
+/// settings — confirmed directly (not assumed) that this account does not:
+/// every `auth_token` URL came back 401 "Unauthenticated access" even
+/// immediately after upload. So delivery relies on `sign_url` alone, which
+/// doesn't hard-expire but still requires the API secret to construct, so
+/// URLs aren't guessable.
 export function deliveryUrls({ publicId, resourceType }) {
   configure();
-  const authToken = { duration: AUTH_TOKEN_DURATION_SECONDS, key: cloudinary.config().api_secret };
   const url = cloudinary.url(publicId, {
     resource_type: resourceType,
     type: 'authenticated',
     sign_url: true,
     secure: true,
-    auth_token: authToken,
   });
   if (resourceType !== 'image') return { url, thumbnailUrl: url };
   const thumbnailUrl = cloudinary.url(publicId, {
@@ -101,7 +97,6 @@ export function deliveryUrls({ publicId, resourceType }) {
     type: 'authenticated',
     sign_url: true,
     secure: true,
-    auth_token: authToken,
     transformation: [{ width: 480, crop: 'limit' }],
   });
   return { url, thumbnailUrl };
