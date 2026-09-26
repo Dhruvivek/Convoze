@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
@@ -7,15 +9,18 @@ import 'package:uuid/uuid.dart';
 
 import '../../../core/db/database.dart';
 import '../../../core/db/database_provider.dart';
-import '../../auth/presentation/auth_state.dart';
-import 'local_chat_message.dart';
+import '../../../core/network/dio_provider.dart';
+import '../../../core/realtime/connection_manager.dart';
+import '../../../core/storage/token_store.dart';
+import '../../../core/sync/sync_engine.dart';
+import '../../../core/sync/wire.dart';
 import 'media_repository.dart';
 import 'message_action_failure.dart';
 
 part 'messages_repository.g.dart';
 
-/// A photo or a document — the two kinds this reduced-scope pass of #40
-/// sends (video is out of scope).
+/// A photo or a document — the two kinds #40's tracer bullet sends (video is
+/// out of scope).
 enum MediaKind {
   image('image'),
   file('file');
@@ -25,48 +30,146 @@ enum MediaKind {
   final String wireName;
 }
 
-/// Sending and reading a chat thread's messages: real (unlike the mock
-/// `mock_thread.dart` this replaces), but deliberately minimal — no read
-/// receipts, no history pagination beyond what `rest_snapshot.dart` already
-/// rebuilds, no react wiring. `sendText`/`sendMedia` insert into the
-/// `Outbox`; the already-real `SyncEngine.drainOutbox` (#51) does the rest.
-/// `editMessage`/`deleteMessage` (#56) go straight over the socket instead.
+/// The outcome of fetching one page of older history (#55).
+class LoadOlderResult {
+  const LoadOlderResult({required this.fetchedCount, required this.reachedStart});
+
+  final int fetchedCount;
+
+  /// True once the fetched page was shorter than a full page — the server's
+  /// signal (`nextBefore: null`) that there's nothing older left.
+  final bool reachedStart;
+}
+
+/// The chat screen's data layer (#53/#55): sending, marking read, and
+/// paging history, all against the Local replica (`CONTEXT.md`) — the
+/// screen itself never touches the socket or REST directly.
+/// `editMessage`/`deleteMessage` (#56) are the one exception: there's no
+/// offline case to resume, only one to refuse (see `ensureConnected`), so
+/// they go straight over the socket instead of through the Outbox.
 class MessagesRepository {
-  MessagesRepository(this._db);
+  MessagesRepository({
+    required this.db,
+    required this.dio,
+    required this.tokenStore,
+    required this.syncEngine,
+    required this.currentSocket,
+  });
 
-  final AppDatabase _db;
+  final AppDatabase db;
+  final Dio dio;
+  final TokenStore tokenStore;
+  final SyncEngine syncEngine;
 
-  Future<void> sendText(String conversationId, String content) {
-    final trimmed = content.trim();
-    if (trimmed.isEmpty) return Future.value();
-    return _db
-        .into(_db.outbox)
+  /// The live socket, or null while there is none (`ConnectionManager.socket`)
+  /// — kept to just this seam, rather than the whole connection manager, so
+  /// [send]/[markRead] can kick an immediate drain/flush without depending
+  /// on connection lifecycle/app-lifecycle plumbing that's irrelevant here.
+  final io.Socket? Function() currentSocket;
+
+  Stream<List<Message>> watchConfirmedMessages(String conversationId) =>
+      (db.select(db.messages)
+            ..where((t) => t.conversationId.equals(conversationId))
+            ..orderBy([
+              (t) => OrderingTerm.asc(t.createdAt),
+              (t) => OrderingTerm.asc(t.id),
+            ]))
+          .watch();
+
+  Stream<List<OutboxData>> watchOutbox(String conversationId) =>
+      (db.select(db.outbox)
+            ..where((t) => t.conversationId.equals(conversationId))
+            ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
+          .watch();
+
+  /// Every other Participant's row (both watermarks), for tick derivation.
+  Stream<List<Participant>> watchOtherParticipants(String conversationId) {
+    return Stream.fromFuture(tokenStore.readUser()).asyncExpand((user) {
+      final myId = user?.id;
+      final query = db.select(db.participants)
+        ..where((t) => t.conversationId.equals(conversationId));
+      return query.watch().map(
+        (rows) => rows.where((p) => p.userId != myId).toList(),
+      );
+    });
+  }
+
+  /// Whether any Message for [conversationId] is already in the replica —
+  /// the chat screen's "fetch the first page on open" trigger (#55).
+  Future<bool> hasLocalMessages(String conversationId) async {
+    final row = await (db.select(db.messages)
+          ..where((t) => t.conversationId.equals(conversationId))
+          ..limit(1))
+        .getSingleOrNull();
+    return row != null;
+  }
+
+  /// Queues [text] in the Outbox (ADR 0009) and, if connected, kicks the
+  /// drainer right away rather than waiting for the next reconnect.
+  /// [linkPreview] is the `{url, title, description}` shape `drainOutbox`
+  /// already knows how to send (`sendMessage.js` validates it server-side;
+  /// nothing on this branch builds one yet, but the Outbox column and wire
+  /// shape have carried it since #51).
+  Future<void> send(
+    String conversationId,
+    String text, {
+    String? replyToMessageId,
+    Map<String, dynamic>? linkPreview,
+  }) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    await db
+        .into(db.outbox)
         .insert(
           OutboxCompanion.insert(
             clientMsgId: const Uuid().v4(),
             conversationId: conversationId,
             content: trimmed,
-            type: const Value('text'),
-            createdAt: DateTime.now(),
+            replyToMessageId: Value(replyToMessageId),
+            linkPreview: Value(
+              linkPreview == null ? null : jsonEncode(linkPreview),
+            ),
+            createdAt: DateTime.now().toUtc(),
           ),
         );
+    _kickDrainIfConnected();
+  }
+
+  /// Queues a photo or document [upload] in the Outbox (#40's reduced
+  /// photos+documents-only pass), the same "shows at once, drains when
+  /// connected" path as [send]. [caption] becomes the row's `content`;
+  /// [fileName] is only meaningful for [MediaKind.file].
+  Future<void> sendMedia(
+    String conversationId, {
+    required MediaKind kind,
+    required CloudinaryUploadResult upload,
+    String? caption,
+    String? fileName,
+  }) async {
+    await db
+        .into(db.outbox)
+        .insert(
+          OutboxCompanion.insert(
+            clientMsgId: const Uuid().v4(),
+            conversationId: conversationId,
+            content: caption?.trim() ?? '',
+            type: Value(kind.wireName),
+            media: Value(jsonEncode(upload.toJson(fileName: fileName))),
+            createdAt: DateTime.now().toUtc(),
+          ),
+        );
+    _kickDrainIfConnected();
   }
 
   /// Edits [messageId] (the sender's own, still-plain-text Message) via a
-  /// direct `message:edit` ack (#56) — not queued in the Outbox, the same
-  /// reasoning as `ConversationPrefsRepository`: there's no offline case to
-  /// resume, only one to refuse (see `ensureConnected`). The local replica
-  /// isn't touched here; the `message.edited` Update this fans out echoes
-  /// back and applies through the usual sync path, sender included.
-  Future<void> editMessage(
-    io.Socket socket, {
-    required String messageId,
-    required String content,
-  }) async {
-    final response = await _emitForAck(socket, 'message:edit', {
-      'messageId': messageId,
-      'content': content.trim(),
-    });
+  /// direct `message:edit` ack (#56). The local replica isn't touched here;
+  /// the `message.edited` Update this fans out echoes back and applies
+  /// through the usual sync path, sender included.
+  Future<void> editMessage(String messageId, String content) async {
+    final response = await _emitForAck(
+      'message:edit',
+      {'messageId': messageId, 'content': content.trim()},
+    );
     if (response['ok'] != true) {
       throw MessageActionFailure.fromCode(response['code'] as String?);
     }
@@ -74,18 +177,16 @@ class MessagesRepository {
 
   /// Deletes [messageId] (the sender's own Message) via a direct
   /// `message:delete` ack (#56) — see [editMessage].
-  Future<void> deleteMessage(io.Socket socket, {required String messageId}) async {
-    final response = await _emitForAck(socket, 'message:delete', {'messageId': messageId});
+  Future<void> deleteMessage(String messageId) async {
+    final response = await _emitForAck('message:delete', {'messageId': messageId});
     if (response['ok'] != true) {
       throw MessageActionFailure.fromCode(response['code'] as String?);
     }
   }
 
-  Future<Map<String, dynamic>> _emitForAck(
-    io.Socket socket,
-    String event,
-    Map<String, dynamic> data,
-  ) async {
+  Future<Map<String, dynamic>> _emitForAck(String event, Map<String, dynamic> data) async {
+    final socket = currentSocket();
+    if (socket == null) throw const MessageActionNetworkFailure();
     try {
       final response = await socket.timeout(15000).emitWithAckAsync(event, data);
       return (response as Map).cast<String, dynamic>();
@@ -94,111 +195,136 @@ class MessagesRepository {
     }
   }
 
-  Future<void> sendMedia(
-    String conversationId, {
-    required MediaKind kind,
-    required CloudinaryUploadResult upload,
-    String? caption,
-    String? fileName,
-  }) {
-    return _db
-        .into(_db.outbox)
-        .insert(
-          OutboxCompanion.insert(
-            clientMsgId: const Uuid().v4(),
-            conversationId: conversationId,
-            content: caption?.trim() ?? '',
-            type: Value(kind.wireName),
-            media: Value(jsonEncode(upload.toJson(fileName: fileName))),
-            createdAt: DateTime.now(),
-          ),
-        );
+  /// Puts a `failed` Outbox row ("failed — tap to retry or delete", ADR
+  /// 0009) back to `pending` and, if connected, kicks the drainer right away
+  /// rather than waiting for the next reconnect. A no-op if the row is
+  /// already gone (sent meanwhile, or already discarded).
+  Future<void> retry(String clientMsgId) async {
+    await (db.update(db.outbox)..where((t) => t.clientMsgId.equals(clientMsgId)))
+        .write(const OutboxCompanion(status: Value('pending')));
+    _kickDrainIfConnected();
   }
 
-  /// Every real Message plus any not-yet-drained Outbox row for
-  /// [conversationId], oldest first — a `UNION ALL` (mirroring
-  /// `ConversationsRepository.watchList`'s raw-SQL join for the same reason:
-  /// this isn't expressible comfortably with drift's type-safe builder) so a
-  /// sent message shows immediately, then is replaced by its real row once
-  /// the drainer's `message.new` echo lands and deletes the Outbox row.
-  /// `json_extract` reads the media fields an Outbox row keeps as JSON.
-  Stream<List<LocalChatMessage>> watchMessages(String conversationId, {required String myUserId}) {
-    final query = _db.customSelect(
-      '''
-      SELECT
-        m.id AS id, m.client_msg_id AS client_msg_id, m.sender_id AS sender_id,
-        m.content AS content, m.type AS type, m.is_deleted AS is_deleted,
-        m.created_at AS created_at, m.edited_at AS edited_at,
-        m.media_public_id AS media_public_id, m.media_resource_type AS media_resource_type,
-        m.media_bytes AS media_bytes, m.media_width AS media_width, m.media_height AS media_height,
-        m.media_format AS media_format, m.media_file_name AS media_file_name,
-        m.media_url AS media_url, m.media_thumbnail_url AS media_thumbnail_url,
-        0 AS is_pending, 0 AS is_failed
-      FROM messages m
-      WHERE m.conversation_id = ?1
-      UNION ALL
-      SELECT
-        NULL AS id, o.client_msg_id AS client_msg_id, ?2 AS sender_id,
-        o.content AS content, o.type AS type, 0 AS is_deleted,
-        o.created_at AS created_at, NULL AS edited_at,
-        json_extract(o.media, '\$.publicId') AS media_public_id,
-        json_extract(o.media, '\$.resourceType') AS media_resource_type,
-        json_extract(o.media, '\$.bytes') AS media_bytes,
-        json_extract(o.media, '\$.width') AS media_width,
-        json_extract(o.media, '\$.height') AS media_height,
-        json_extract(o.media, '\$.format') AS media_format,
-        json_extract(o.media, '\$.fileName') AS media_file_name,
-        NULL AS media_url, NULL AS media_thumbnail_url,
-        CASE WHEN o.status = 'failed' THEN 0 ELSE 1 END AS is_pending,
-        CASE WHEN o.status = 'failed' THEN 1 ELSE 0 END AS is_failed
-      FROM outbox o
-      WHERE o.conversation_id = ?1
-        AND NOT EXISTS (SELECT 1 FROM messages m2 WHERE m2.client_msg_id = o.client_msg_id)
-      ORDER BY created_at ASC
-      ''',
-      variables: [Variable.withString(conversationId), Variable.withString(myUserId)],
-      readsFrom: {_db.messages, _db.outbox},
+  /// Kicks the drainer right away rather than waiting for the next
+  /// reconnect/catch-up, if there's a socket to kick it on.
+  void _kickDrainIfConnected() {
+    final socket = currentSocket();
+    if (socket != null) unawaited(syncEngine.drainOutbox(socket));
+  }
+
+  /// Deletes a `failed` Outbox row for good, per the user's "delete" choice
+  /// (ADR 0009).
+  Future<void> discard(String clientMsgId) {
+    return (db.delete(
+      db.outbox,
+    )..where((t) => t.clientMsgId.equals(clientMsgId))).go();
+  }
+
+  /// Moves the local read watermark to the newest local Message at once,
+  /// zeroes the unread badge, and upserts the one pending read this
+  /// Conversation may have (ADR 0009) — flushed by [SyncEngine] when
+  /// connected. A no-op if already caught up, or if nothing's local yet.
+  Future<void> markRead(String conversationId) async {
+    final myId = (await tokenStore.readUser())?.id;
+    if (myId == null) return;
+    final latest = await (db.select(db.messages)
+          ..where((t) => t.conversationId.equals(conversationId))
+          ..orderBy([
+            (t) => OrderingTerm.desc(t.createdAt),
+            (t) => OrderingTerm.desc(t.id),
+          ])
+          ..limit(1))
+        .getSingleOrNull();
+    if (latest == null) return;
+
+    final me = await (db.select(db.participants)..where(
+          (t) =>
+              t.conversationId.equals(conversationId) & t.userId.equals(myId),
+        ))
+        .getSingleOrNull();
+    if (me != null &&
+        me.lastReadMessageId != null &&
+        me.lastReadMessageId!.compareTo(latest.id) >= 0) {
+      return;
+    }
+
+    await db.transaction(() async {
+      await (db.update(db.participants)..where(
+            (t) =>
+                t.conversationId.equals(conversationId) &
+                t.userId.equals(myId),
+          ))
+          .write(
+            ParticipantsCompanion(
+              lastReadMessageId: Value(latest.id),
+              lastDeliveredMessageId: Value(latest.id),
+            ),
+          );
+      await (db.update(
+        db.conversations,
+      )..where((t) => t.id.equals(conversationId))).write(
+        const ConversationsCompanion(unreadCount: Value(0)),
+      );
+      await db
+          .into(db.pendingReads)
+          .insertOnConflictUpdate(
+            PendingReadsCompanion.insert(
+              conversationId: conversationId,
+              messageId: latest.id,
+            ),
+          );
+    });
+
+    final socket = currentSocket();
+    if (socket != null) unawaited(syncEngine.flushPendingReads(socket));
+  }
+
+  /// Fetches the page of history strictly older than the oldest local
+  /// Message (or the first page, if none is local yet) and applies it to
+  /// the replica (#55). Reuses `wire.dart`'s hydration helpers — the exact
+  /// functions the sync engine and snapshot rebuild already use for the
+  /// same wire shape.
+  Future<LoadOlderResult> loadOlder(String conversationId) async {
+    final oldest = await (db.select(db.messages)
+          ..where((t) => t.conversationId.equals(conversationId))
+          ..orderBy([
+            (t) => OrderingTerm.asc(t.createdAt),
+            (t) => OrderingTerm.asc(t.id),
+          ])
+          ..limit(1))
+        .getSingleOrNull();
+
+    final response = await dio.get<Map<String, dynamic>>(
+      '/conversations/$conversationId/messages',
+      queryParameters: {if (oldest != null) 'before': oldest.id},
     );
-    return query.watch().map((rows) => rows.map((row) => _toMessage(row, myUserId)).toList());
-  }
+    final body = response.data!;
+    final messages = (body['messages'] as List)
+        .map((m) => (m as Map).cast<String, dynamic>())
+        .toList();
 
-  LocalChatMessage _toMessage(QueryRow row, String myUserId) {
-    final senderId = row.read<String>('sender_id');
-    return LocalChatMessage(
-      id: row.read<String?>('id'),
-      clientMsgId: row.read<String?>('client_msg_id'),
-      senderIsMe: senderId == myUserId,
-      content: row.read<String?>('content'),
-      type: row.read<String>('type'),
-      isDeleted: row.read<bool>('is_deleted'),
-      createdAt: row.read<DateTime>('created_at'),
-      editedAt: row.read<DateTime?>('edited_at'),
-      isPending: row.read<bool>('is_pending'),
-      isFailed: row.read<bool>('is_failed'),
-      mediaPublicId: row.read<String?>('media_public_id'),
-      mediaResourceType: row.read<String?>('media_resource_type'),
-      mediaBytes: row.read<int?>('media_bytes'),
-      mediaWidth: row.read<int?>('media_width'),
-      mediaHeight: row.read<int?>('media_height'),
-      mediaFormat: row.read<String?>('media_format'),
-      mediaFileName: row.read<String?>('media_file_name'),
-      mediaUrl: row.read<String?>('media_url'),
-      mediaThumbnailUrl: row.read<String?>('media_thumbnail_url'),
+    await db.transaction(() async {
+      await upsertUsers(db, (body['users'] as List?) ?? const []);
+      for (final message in messages) {
+        await upsertMessagePayload(db, message);
+      }
+    });
+
+    return LoadOlderResult(
+      fetchedCount: messages.length,
+      reachedStart: body['nextBefore'] == null,
     );
   }
 }
 
 @Riverpod(keepAlive: true)
-MessagesRepository messagesRepository(Ref ref) =>
-    MessagesRepository(ref.watch(appDatabaseProvider));
-
-/// The live thread for [conversationId] — empty (rather than an error) while
-/// signed out, same reasoning as `conversationList`.
-@riverpod
-Stream<List<LocalChatMessage>> chatMessages(Ref ref, String conversationId) {
-  final authState = ref.watch(authStateProvider);
-  if (authState is! Authenticated) return Stream.value(const []);
-  return ref
-      .watch(messagesRepositoryProvider)
-      .watchMessages(conversationId, myUserId: authState.user.id);
-}
+MessagesRepository messagesRepository(Ref ref) => MessagesRepository(
+  db: ref.watch(appDatabaseProvider),
+  dio: ref.watch(dioProvider),
+  tokenStore: ref.watch(tokenStoreProvider),
+  syncEngine: ref.watch(syncEngineProvider),
+  // Read lazily, not watched: a new socket instance shouldn't recreate this
+  // keepAlive repository, the same trick `connectionManagerProvider` itself
+  // uses for its own lazy reads.
+  currentSocket: () => ref.read(connectionManagerProvider).socket,
+);

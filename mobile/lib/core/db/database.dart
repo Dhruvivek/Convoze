@@ -67,6 +67,27 @@ class AppDatabase extends _$AppDatabase {
     });
   }
 
+  /// Logout's wipe path (#54, ADR 0009: "logout then wipes everything, the
+  /// Outbox included") — the one time the Outbox itself is dropped, since
+  /// this Device is giving up its Session and any Message it never managed
+  /// to send is gone with it.
+  Future<void> wipeAll() {
+    return transaction(() async {
+      await wipeExceptOutbox();
+      await delete(outbox).go();
+    });
+  }
+
+  /// How many Messages this Device has composed but not yet had confirmed or
+  /// given up on — what the logout warning ("N unsent messages will be
+  /// lost") counts (#54).
+  Future<int> outboxCount() async {
+    final row = await (selectOnly(
+      outbox,
+    )..addColumns([outbox.clientMsgId.count()])).getSingle();
+    return row.read(outbox.clientMsgId.count()) ?? 0;
+  }
+
   /// The stored Sync cursor, or null if there isn't one (a fresh install, or
   /// right after a wipe) — sent as `since` in the socket handshake.
   Future<int?> readCursor() async {

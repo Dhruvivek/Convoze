@@ -8,6 +8,7 @@ import { createSendRateLimit } from '../messaging/rateLimiter.js';
 import { createReactionToggler } from '../messaging/reactionToggle.js';
 import { createMessageSender } from '../messaging/sendMessage.js';
 import { resolveStartSeq } from '../messaging/syncState.js';
+import { createPresenceService } from './presence.js';
 import { createConnectionRegistry } from './registry.js';
 
 export const userRoom = (userId) => `user:${userId}`;
@@ -16,10 +17,18 @@ export const conversationRoom = (conversationId) => `conversation:${conversation
 // The Socket.IO server, not yet attached to an HTTP server. Every socket is
 // authenticated at its handshake and joined to its rooms by the server;
 // clients can't join or leave rooms themselves (ADR 0005).
-export function createRealtime({ prisma, authenticate, clock, sessionRevoked, pumpOptions = {} }) {
+export function createRealtime({
+  prisma,
+  authenticate,
+  clock,
+  sessionRevoked,
+  pumpOptions = {},
+  faults,
+}) {
   // The only client is the app, so no HTTP long-polling fallback.
   const io = new Server({ transports: ['websocket'] });
   const registry = createConnectionRegistry();
+  const presence = createPresenceService({ prisma, registry, clock });
 
   // Revocation reaches open sockets immediately (ADR 0005, #33): logout,
   // logout-others and refresh-token reuse detection all fire this hook.
@@ -95,12 +104,11 @@ export function createRealtime({ prisma, authenticate, clock, sessionRevoked, pu
       auth.userId,
       socket.handshake.auth?.since,
     );
+    const conversationIds = participants.map(({ conversationId }) => conversationId);
     socket.data = {
       ...auth,
-      rooms: [
-        userRoom(auth.userId),
-        ...participants.map(({ conversationId }) => conversationRoom(conversationId)),
-      ],
+      rooms: [userRoom(auth.userId), ...conversationIds.map(conversationRoom)],
+      conversationIds,
       startSeq,
       resetSeq,
     };
@@ -108,20 +116,42 @@ export function createRealtime({ prisma, authenticate, clock, sessionRevoked, pu
   }
 
   io.on('connection', (socket) => {
-    const { userId, sessionId, rooms, startSeq, resetSeq } = socket.data;
-    registry.register(socket.id, { userId, sessionId });
+    const { userId, sessionId, rooms, conversationIds, startSeq, resetSeq } = socket.data;
+    const { userCameOnline } = registry.register(socket.id, { userId, sessionId });
     socket.join(rooms);
     // The handshake extension (#48/ADR 0008): a Device too far behind (or
     // connecting for the first time) is told to rebuild from a snapshot and
     // resume from here, instead of the pump trying to resend a gap it can't.
     if (resetSeq !== null) socket.emit('sync:reset', { currentSeq: resetSeq });
 
+    // Presence (#34): a second Device/reconnect fires nothing (`userCameOnline`
+    // is only true on the user's 0 → 1 transition), broadcast straight to the
+    // user's own Conversation rooms rather than computing the audience twice.
+    // The snapshot is sent after auto-join, covering the connecting user's
+    // full presence audience — fire-and-forget, logged rather than failing
+    // the connection if the DB hiccups.
+    const conversationRoomNames = conversationIds.map(conversationRoom);
+    if (userCameOnline) io.to(conversationRoomNames).emit('userOnline', { userId });
+    presence.snapshotFor(userId, conversationIds).then(
+      (snapshot) => socket.emit('presenceSnapshot', snapshot),
+      (err) => console.error(err),
+    );
+
     const pump = createPump({ prisma, socket, userId, startSeq, onWake: wakeUser, ...pumpOptions });
     addPump(userId, pump);
     pump.wake();
 
-    function handle(action) {
+    function handle(action, event) {
       return async (payload, callback) => {
+        // e2e fault injection (#54): consumed, and acked, before the real
+        // handler ever runs — so an injected `INVALID`/`RATE_LIMITED` behaves
+        // exactly like the real guard rejecting it, and a faulted call has no
+        // other side effect (no message row, no rate-limit slot spent).
+        const injectedCode = faults?.consumeEvent(event);
+        if (injectedCode) {
+          callback?.({ ok: false, code: injectedCode });
+          return;
+        }
         try {
           const result = await action(userId, payload);
           callback?.(result);
@@ -138,16 +168,39 @@ export function createRealtime({ prisma, authenticate, clock, sessionRevoked, pu
       };
     }
 
-    socket.on('message:send', handle(sendMessage));
-    socket.on('message:edit', handle(editMessage));
-    socket.on('message:delete', handle(deleteMessage));
-    socket.on('reaction:toggle', handle(toggleReaction));
-    socket.on('conversation:read', handle(markRead));
+    socket.on('message:send', handle(sendMessage, 'message:send'));
+    socket.on('message:edit', handle(editMessage, 'message:edit'));
+    socket.on('message:delete', handle(deleteMessage, 'message:delete'));
+    socket.on('reaction:toggle', handle(toggleReaction, 'reaction:toggle'));
+    socket.on('conversation:read', handle(markRead, 'conversation:read'));
+
+    // Typing relay (#35): stateless, no ack, no Update. Silently dropped
+    // unless the socket is actually in that Conversation's room (ADR 0005:
+    // a non-participant can't inject a fake indicator), otherwise broadcast
+    // to the room excluding the sender, with their userId attached.
+    function relayTyping(event) {
+      return (payload) => {
+        const conversationId = payload?.conversationId;
+        if (typeof conversationId !== 'string') return;
+        const room = conversationRoom(conversationId);
+        if (!socket.rooms.has(room)) return;
+        socket.to(room).emit(event, { conversationId, userId });
+      };
+    }
+
+    socket.on('typing', relayTyping('typing'));
+    socket.on('stopTyping', relayTyping('stopTyping'));
 
     socket.on('disconnect', () => {
       pump.stop();
       removePump(userId, pump);
-      registry.unregister(socket.id);
+      const { userWentOffline } = registry.unregister(socket.id);
+      if (userWentOffline) {
+        presence.markOffline(userId).then(
+          (lastSeenAt) => io.to(conversationRoomNames).emit('userOffline', { userId, lastSeenAt }),
+          (err) => console.error(err),
+        );
+      }
     });
   });
 
@@ -192,5 +245,8 @@ export function createRealtime({ prisma, authenticate, clock, sessionRevoked, pu
     // #50) wake a User's connected pumps the same way every socket action
     // already does.
     wakeUser,
+    // Graceful shutdown's "write lastSeenAt for every online user" pass
+    // (#34) — called before `io.close()`.
+    presence,
   };
 }

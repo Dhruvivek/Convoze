@@ -1,5 +1,6 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../../../core/db/database_provider.dart';
 import '../../../core/models/user.dart';
 import '../../../core/storage/token_store.dart';
 import '../data/auth_repository.dart';
@@ -110,6 +111,11 @@ class AuthState extends _$AuthState {
       // Best effort: the Session still ends on this Device.
     }
     await ref.read(tokenStoreProvider).clearSession();
+    // The replica is disposable except the Outbox (ADR 0009) — but logout
+    // takes the Outbox with it too (#54): whatever this Device never
+    // managed to send is gone with the Session, after the caller has
+    // already warned the user how many messages that is.
+    await ref.read(appDatabaseProvider).wipeAll();
     state = const Unauthenticated();
   }
 }

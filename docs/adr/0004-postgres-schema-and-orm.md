@@ -1,6 +1,6 @@
 # Postgres schema & ORM
 
-**Status:** accepted — amended by [ADR 0008](0008-message-delivery-pipeline-update-log-and-sync-cursor.md) (delivered state reinstated as a Delivery watermark); amended by [ADR 0009](0009-local-first-client-data-layer.md) (Conversation preferences columns on `Participant`)
+**Status:** accepted — amended by [ADR 0008](0008-message-delivery-pipeline-update-log-and-sync-cursor.md) (delivered state reinstated as a Delivery watermark); amended by [ADR 0009](0009-local-first-client-data-layer.md) (Conversation preferences columns on `Participant`); amended by [ADR 0005](0005-realtime-transport-and-flutter-socket-integration.md) (`User.lastSeenAt`, #34)
 
 ## Context
 
@@ -20,7 +20,10 @@
 ```
 User
  ├─ id (uuidv7 pk), phoneNumber (unique), phoneVerifiedAt,
- │  displayName (nullable), avatarUrl (nullable), createdAt
+ │  displayName (nullable), avatarUrl (nullable), createdAt,
+ │  lastSeenAt (nullable — #34: when this User's last live socket
+ │  disconnected; "online" itself is derived from the live-connection
+ │  registry, never stored)
 
 Session
  ├─ id (uuidv7 pk), userId (fk User), deviceId, platform,

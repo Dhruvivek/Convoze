@@ -4,6 +4,7 @@ import 'package:convoze/app.dart';
 import 'package:convoze/core/db/database.dart';
 import 'package:convoze/core/db/database_provider.dart';
 import 'package:convoze/core/realtime/connection_manager.dart';
+import 'package:convoze/core/router/app_router.dart';
 import 'package:convoze/features/auth/presentation/otp_entry_screen.dart';
 import 'package:convoze/features/auth/presentation/phone_entry_screen.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -75,3 +76,13 @@ Future<String> currentUserId() async {
 AppDatabase replica(WidgetTester tester) =>
     ProviderScope.containerOf(tester.element(find.byType(ConvozeApp)))
         .read(appDatabaseProvider);
+
+/// Pushes the chat screen for [conversationId] directly (#53/#55's screen
+/// has no entry point in the conversation list yet, #52), the same way a
+/// deep link or a future list-tap would.
+Future<void> openChat(WidgetTester tester, String conversationId) async {
+  ProviderScope.containerOf(tester.element(find.byType(ConvozeApp)))
+      .read(routerProvider)
+      .push('/chat/$conversationId');
+  await tester.pumpAndSettle();
+}

@@ -2,10 +2,11 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:socket_io_client/src/manager.dart';
 
 /// A socket double for `emitWithAckAsync`-driven calls (the Outbox drainer,
-/// `MessagesRepository.editMessage`/`deleteMessage`): [emitWithAckAsync]
-/// returns [response] instead of touching the network, mirroring what
-/// `message:send`/`message:edit`/`message:delete`'s ack contracts return
-/// (`sendMessage.js`/`editMessage.js`/`deleteMessage.js`).
+/// the pending-reads flusher, `MessagesRepository.editMessage`/
+/// `deleteMessage`): [emitWithAckAsync] returns [response] instead of
+/// touching the network, mirroring what `message:send`/`conversation:read`/
+/// `message:edit`/`message:delete`'s ack contracts return
+/// (`sendMessage.js`/`markRead.js`/`editMessage.js`/`deleteMessage.js`).
 class FakeAckSocket extends io.Socket {
   FakeAckSocket(this.response)
     : super(Manager(uri: 'http://fake', options: {'autoConnect': false}), '/', const {});
@@ -28,8 +29,11 @@ class TimingOutSocket extends io.Socket {
   TimingOutSocket()
     : super(Manager(uri: 'http://fake', options: {'autoConnect': false}), '/', const {});
 
+  final sentEvents = <String>[];
+
   @override
   Future emitWithAckAsync(String event, dynamic data, {Function? ack, bool binary = false}) async {
+    sentEvents.add(event);
     throw StateError('ack timed out');
   }
 }

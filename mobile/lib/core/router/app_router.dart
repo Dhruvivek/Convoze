@@ -81,7 +81,6 @@ GoRouter router(Ref ref) {
             path: 'thread/:id',
             builder: (context, state) => ChatThreadScreen(
               conversationId: state.pathParameters['id']!,
-              title: state.extra as String?,
             ),
             routes: [
               GoRoute(
@@ -94,6 +93,15 @@ GoRouter router(Ref ref) {
             ],
           ),
         ],
+      ),
+      // Legacy alias: real navigation always uses `/thread/:id` (nested
+      // under the shell, so `context.pop()` returns to it), but some
+      // integration tests still push this flat path directly.
+      GoRoute(
+        path: '/chat/:conversationId',
+        builder: (context, state) => ChatThreadScreen(
+          conversationId: state.pathParameters['conversationId']!,
+        ),
       ),
     ],
   );

@@ -36,6 +36,10 @@ httpServer.listen(config.port, () => {
 
 async function shutdown() {
   retentionJob.stop();
+  // Presence's graceful-shutdown pass (#34): every currently online User's
+  // `lastSeenAt` is written before their sockets close, so a deliberate
+  // restart doesn't leave "last seen" stuck at an earlier disconnect.
+  await realtime.presence.markAllOfflineForShutdown();
   // Closes the sockets and the HTTP server under them.
   realtime.io.close();
   await prisma.$disconnect();

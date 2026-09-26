@@ -29,6 +29,7 @@ ConnectionManager _manager() {
     onSessionEnded: () {},
     readSyncCursor: () async => null,
     onSocketCreated: (_) {},
+    isOutboxEmpty: () async => true,
   );
 }
 

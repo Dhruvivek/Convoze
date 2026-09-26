@@ -1,28 +1,30 @@
-import 'package:convoze/features/conversations/data/local_chat_message.dart';
+import 'package:convoze/features/conversations/data/chat_message_view.dart';
 import 'package:convoze/features/conversations/presentation/message_action_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-LocalChatMessage _message({
-  String? id = 'msg-1',
+ChatMessageView _message({
+  String id = 'msg-1',
   String type = 'text',
   String? content = 'hello',
-  bool senderIsMe = true,
-}) => LocalChatMessage(
+  bool fromMe = true,
+  bool isDeleted = false,
+  MessageTick? tick = MessageTick.sent,
+}) => ChatMessageView(
   id: id,
   clientMsgId: 'c1',
-  senderIsMe: senderIsMe,
+  senderId: fromMe ? 'me' : 'other',
+  fromMe: fromMe,
   content: content,
   type: type,
-  isDeleted: false,
+  isDeleted: isDeleted,
   createdAt: DateTime.utc(2026, 1, 1),
-  isPending: false,
-  isFailed: false,
+  tick: tick,
 );
 
 Future<void> openSheet(
   WidgetTester tester,
-  LocalChatMessage message, {
+  ChatMessageView message, {
   VoidCallback? onEdit,
   VoidCallback? onDelete,
 }) async {
@@ -51,7 +53,7 @@ void main() {
   });
 
   testWidgets('offers neither for someone else\'s message', (tester) async {
-    await openSheet(tester, _message(senderIsMe: false));
+    await openSheet(tester, _message(fromMe: false, tick: null));
     expect(find.text('Edit'), findsNothing);
     expect(find.text('Delete'), findsNothing);
   });
@@ -63,7 +65,19 @@ void main() {
   });
 
   testWidgets('offers neither for a still-pending Outbox row', (tester) async {
-    await openSheet(tester, _message(id: null));
+    await openSheet(tester, _message(tick: MessageTick.clock));
+    expect(find.text('Edit'), findsNothing);
+    expect(find.text('Delete'), findsNothing);
+  });
+
+  testWidgets('offers neither for a failed Outbox row', (tester) async {
+    await openSheet(tester, _message(tick: MessageTick.failed));
+    expect(find.text('Edit'), findsNothing);
+    expect(find.text('Delete'), findsNothing);
+  });
+
+  testWidgets('offers neither for an already-deleted message', (tester) async {
+    await openSheet(tester, _message(isDeleted: true, content: null, tick: null));
     expect(find.text('Edit'), findsNothing);
     expect(find.text('Delete'), findsNothing);
   });

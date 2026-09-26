@@ -5,6 +5,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import '../../features/auth/presentation/auth_state.dart';
+import '../db/database_provider.dart';
 import '../network/dio_provider.dart';
 import '../network/session_refresher.dart';
 import '../storage/jwt.dart';
@@ -43,6 +44,8 @@ class ConnectionManager with WidgetsBindingObserver {
     required this._onSessionEnded,
     required this._readSyncCursor,
     required this._onSocketCreated,
+    required this._isOutboxEmpty,
+    this.backgroundGrace = const Duration(seconds: 20),
   }) {
     WidgetsBinding.instance.addObserver(this);
   }
@@ -51,6 +54,20 @@ class ConnectionManager with WidgetsBindingObserver {
   final TokenStore _tokenStore;
   final SessionRefresher _sessionRefresher;
 
+  /// Whether the Outbox has nothing left to send, read fresh every time the
+  /// background grace below needs to check it.
+  final Future<bool> Function() _isOutboxEmpty;
+
+  /// How long a backgrounding is held open for the Outbox to drain before
+  /// disconnecting anyway (#54, amending ADR 0005 per ADR 0009: "~20s,
+  /// iOS `beginBackgroundTask`"). The native iOS extension itself isn't
+  /// wired up yet — this is the cross-platform half, and is what Android
+  /// gets in full; overridable so tests don't wait the real 20s.
+  final Duration backgroundGrace;
+
+  /// How often the grace period rechecks the Outbox while waiting.
+  static const _backgroundGracePoll = Duration(milliseconds: 200);
+
   /// The sync engine's stored cursor (#51 / ADR 0008), read fresh for every
   /// (re)connect attempt — including automatic ones — the same way the
   /// token already is, so `since` is never stale.
@@ -58,13 +75,25 @@ class ConnectionManager with WidgetsBindingObserver {
 
   /// Lets the sync engine (#51) attach its `sync:*` handlers to a new socket
   /// instance, the same way `sessionRevoked` is wired below — called once
-  /// per [connect], before the socket connects.
+  /// per [connect], before the socket connects. A constructor callback,
+  /// wired from `connectionManagerProvider` itself (core-to-core, since
+  /// `SyncEngine` lives in `lib/core/sync/`) — unlike [socketCreated] below,
+  /// which a `lib/features/` repository subscribes to from its own provider,
+  /// since core can't import a feature to call it the same way.
   final void Function(io.Socket socket) _onSocketCreated;
 
   /// Tells the app the Session is gone, once its tokens are already cleared
   /// (#20's `AuthState.sessionEnded`), so the router sends it to login.
   final void Function() _onSessionEnded;
   final _statusChanges = StreamController<ConnectionStatus>.broadcast();
+
+  /// Every new socket instance [connect] creates, for features in
+  /// `lib/features/` to attach their own event handling to — the seam ADR
+  /// 0005 describes ("features take the raw socket and handle their own
+  /// events"), without `lib/core/` importing any of them itself. Automatic
+  /// reconnects reuse the same instance, so this doesn't fire again for them
+  /// (`SyncEngine.attach`'s own doc comment says the same).
+  final _socketCreatedController = StreamController<io.Socket>.broadcast();
 
   /// How long before its expiry an access token is treated as due for
   /// renewal, so a handshake sent just under the wire doesn't land at the
@@ -80,6 +109,11 @@ class ConnectionManager with WidgetsBindingObserver {
   /// Whether there's a Session to connect for. Backgrounding while this is
   /// false (or foregrounding before it's true) does nothing.
   bool _authenticated = false;
+
+  /// Bumped by every lifecycle transition, so a background grace wait that's
+  /// superseded by a foreground return before its own deadline gives up
+  /// (rather than disconnecting a connection the app just came back for).
+  int _lifecycleGeneration = 0;
 
   /// Bumped by every connect and disconnect, so a connect still reading the
   /// token when it's superseded gives up.
@@ -97,6 +131,16 @@ class ConnectionManager with WidgetsBindingObserver {
   Stream<ConnectionStatus> get statusStream => Stream.multi((controller) {
     controller.add(_status);
     final sub = _statusChanges.stream.listen(
+      controller.add,
+      onDone: controller.close,
+    );
+    controller.onCancel = sub.cancel;
+  });
+
+  /// The current socket, if any, then every new instance thereafter.
+  Stream<io.Socket> get socketCreated => Stream.multi((controller) {
+    if (_socket != null) controller.add(_socket!);
+    final sub = _socketCreatedController.stream.listen(
       controller.add,
       onDone: controller.close,
     );
@@ -127,6 +171,7 @@ class ConnectionManager with WidgetsBindingObserver {
       ..auth = (callback) => unawaited(_authenticate(generation, callback));
     _socket = socket;
     _onSocketCreated(socket);
+    _socketCreatedController.add(socket);
     void onChange(ConnectionStatus Function() next) {
       if (identical(_socket, socket)) _setStatus(next());
     }
@@ -252,20 +297,43 @@ class ConnectionManager with WidgetsBindingObserver {
     if (!_authenticated) return;
     switch (state) {
       case AppLifecycleState.resumed:
+        _lifecycleGeneration++;
         unawaited(connect());
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
       case AppLifecycleState.detached:
-        disconnect();
+        unawaited(_disconnectWithBackgroundGrace(++_lifecycleGeneration));
       case AppLifecycleState.inactive:
         break;
     }
+  }
+
+  /// Backgrounding is a deliberate offline transition (ADR 0005) — except
+  /// that a non-empty Outbox gets up to [backgroundGrace] to drain first
+  /// (#54, ADR 0009), so a message sent just before switching away still
+  /// goes out instead of being stranded until the next foreground. Given up
+  /// on early if [generation] is superseded by a foreground return.
+  Future<void> _disconnectWithBackgroundGrace(int generation) async {
+    final deadline = DateTime.now().add(backgroundGrace);
+    while (!await _isOutboxEmpty()) {
+      if (generation != _lifecycleGeneration) return;
+      final remaining = deadline.difference(DateTime.now());
+      if (remaining <= Duration.zero) break;
+      // Never overshoots the cap waiting on a poll longer than what's left.
+      await Future<void>.delayed(
+        remaining < _backgroundGracePoll ? remaining : _backgroundGracePoll,
+      );
+      if (generation != _lifecycleGeneration) return;
+    }
+    if (generation != _lifecycleGeneration) return;
+    disconnect();
   }
 
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     disconnect();
     _statusChanges.close();
+    _socketCreatedController.close();
   }
 
   void _setStatus(ConnectionStatus status) {
@@ -288,6 +356,8 @@ ConnectionManager connectionManager(Ref ref) {
     // on this provider's own dependents), same trick as onSessionEnded above.
     readSyncCursor: () => ref.read(syncEngineProvider).readCursor(),
     onSocketCreated: (socket) => ref.read(syncEngineProvider).attach(socket),
+    isOutboxEmpty: () async =>
+        await ref.read(appDatabaseProvider).outboxCount() == 0,
   );
   ref.onDispose(manager.dispose);
   ref.listen(authStateProvider, (_, auth) {

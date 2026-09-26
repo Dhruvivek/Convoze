@@ -105,7 +105,9 @@ void main() {
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
 
-    expect(connection(tester).status, ConnectionStatus.offline);
+    // An empty Outbox needs no grace (#54), but the disconnect itself is
+    // no longer synchronous with the lifecycle callback.
+    await untilStatus(tester, ConnectionStatus.offline);
     // A deliberate background disconnect isn't shown as "Connecting…" — the
     // user has no screen to see it on anyway.
     expect(find.text('Connecting…'), findsNothing);
