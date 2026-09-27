@@ -57,14 +57,18 @@ final class ContactsRepositoryProvider
 String _$contactsRepositoryHash() =>
     r'64ebd4fe662d4d55d17323a9351a2290cc1b4ecf';
 
-/// The list of everyone else on Convoze, fetched fresh each time the
-/// Contacts tab / New conversation screen is opened.
+/// The Contacts tab / New conversation picker's data source: the Device's
+/// address book, matched against registered Users. Throws
+/// [ContactsPermissionException] when access hasn't been granted, or a
+/// [ContactsFailure] when the match request itself fails.
 
 @ProviderFor(contacts)
 final contactsProvider = ContactsProvider._();
 
-/// The list of everyone else on Convoze, fetched fresh each time the
-/// Contacts tab / New conversation screen is opened.
+/// The Contacts tab / New conversation picker's data source: the Device's
+/// address book, matched against registered Users. Throws
+/// [ContactsPermissionException] when access hasn't been granted, or a
+/// [ContactsFailure] when the match request itself fails.
 
 final class ContactsProvider
     extends
@@ -74,8 +78,10 @@ final class ContactsProvider
           FutureOr<List<User>>
         >
     with $FutureModifier<List<User>>, $FutureProvider<List<User>> {
-  /// The list of everyone else on Convoze, fetched fresh each time the
-  /// Contacts tab / New conversation screen is opened.
+  /// The Contacts tab / New conversation picker's data source: the Device's
+  /// address book, matched against registered Users. Throws
+  /// [ContactsPermissionException] when access hasn't been granted, or a
+  /// [ContactsFailure] when the match request itself fails.
   ContactsProvider._()
     : super(
         from: null,
@@ -101,4 +107,4 @@ final class ContactsProvider
   }
 }
 
-String _$contactsHash() => r'749860034864c2454c8bffa123cbde74f9dab078';
+String _$contactsHash() => r'0143e64c8348f0bed3ada45db901892e9f1fac58';

@@ -91,7 +91,7 @@ export function createApp({
 
   app.use(createMediaRouter({ prisma, authenticated, clock }));
 
-  app.use('/users', createUsersRouter({ prisma, authenticated }));
+  app.use('/users', createUsersRouter({ prisma, authenticated, clock }));
   app.use(createProfileRouter({ prisma, authenticated, clock }));
 
   app.use(notFoundHandler);

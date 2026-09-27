@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:convoze/features/conversations/data/contacts_failure.dart';
 import 'package:convoze/features/conversations/data/contacts_repository.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -45,8 +46,8 @@ void main() {
     return ContactsRepository(dio);
   }
 
-  group('fetchContacts', () {
-    test('returns every User from the response', () async {
+  group('matchContacts', () {
+    test('returns every matched User from the response', () async {
       final users = await repository(
         _StubAdapter.respond(200, {
           'users': [
@@ -54,7 +55,7 @@ void main() {
             {'id': 'u2', 'displayName': null, 'avatarUrl': null, 'phoneNumber': '+14155550101'},
           ],
         }),
-      ).fetchContacts();
+      ).matchContacts(['+14155550100', '+14155550101']);
 
       expect(users, hasLength(2));
       expect(users[0].id, 'u1');
@@ -63,18 +64,57 @@ void main() {
       expect(users[1].phoneNumber, '+14155550101');
     });
 
-    test('returns an empty list when there are no other Users', () async {
+    test('returns an empty list when none of the contacts are on Convoze', () async {
       final users = await repository(
         _StubAdapter.respond(200, {'users': []}),
-      ).fetchContacts();
+      ).matchContacts(['+14155550100']);
 
       expect(users, isEmpty);
     });
 
-    test('propagates a DioException when the backend is unreachable', () async {
+    test('throws ContactsNetworkFailure when the backend is unreachable', () async {
       await expectLater(
-        repository(_StubAdapter.connectionFails()).fetchContacts(),
-        throwsA(isA<DioException>()),
+        repository(_StubAdapter.connectionFails()).matchContacts(['+14155550100']),
+        throwsA(isA<ContactsNetworkFailure>()),
+      );
+    });
+
+    test('throws ContactsRateLimited on a 429', () async {
+      await expectLater(
+        repository(
+          _StubAdapter.respond(429, {
+            'error': {'code': 'rate_limited', 'message': 'Too many contact syncs'},
+          }),
+        ).matchContacts(['+14155550100']),
+        throwsA(isA<ContactsRateLimited>()),
+      );
+    });
+  });
+
+  group('lookupByPhoneNumber', () {
+    test('returns the matched User', () async {
+      final user = await repository(
+        _StubAdapter.respond(200, {
+          'user': {'id': 'u1', 'displayName': 'Priya', 'avatarUrl': null, 'phoneNumber': '+14155550100'},
+        }),
+      ).lookupByPhoneNumber('+14155550100');
+
+      expect(user, isNotNull);
+      expect(user!.id, 'u1');
+    });
+
+    test('returns null when nobody has that number', () async {
+      final user = await repository(
+        _StubAdapter.respond(200, {'user': null}),
+      ).lookupByPhoneNumber('+15555550199');
+
+      expect(user, isNull);
+    });
+
+    test('throws ContactsNetworkFailure when the backend is unreachable', () async {
+      await expectLater(
+        repository(_StubAdapter.connectionFails()).lookupByPhoneNumber('+14155550100'),
+        throwsA(isA<ContactsNetworkFailure>()),
       );
     });
   });

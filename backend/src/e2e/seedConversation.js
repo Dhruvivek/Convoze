@@ -7,7 +7,7 @@ const TYPES = new Set(['direct', 'group']);
 // doesn't describe a valid Conversation.
 export async function seedConversation(prisma, { type, name, participantPhoneNumbers }, now) {
   if (!TYPES.has(type) || !Array.isArray(participantPhoneNumbers)) return null;
-  const phoneNumbers = [...new Set(participantPhoneNumbers.map(normalisePhoneNumber))];
+  const phoneNumbers = [...new Set(participantPhoneNumbers.map((p) => normalisePhoneNumber(p)))];
   const valid =
     phoneNumbers.length > 0 &&
     phoneNumbers.every(Boolean) &&

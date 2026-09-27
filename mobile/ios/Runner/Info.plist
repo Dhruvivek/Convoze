@@ -68,5 +68,7 @@
 	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Convoze needs access to your photos to attach them to a chat.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Convoze needs access to your contacts to show you who's already on Convoze.</string>
 </dict>
 </plist>
