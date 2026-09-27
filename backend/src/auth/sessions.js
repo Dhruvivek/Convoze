@@ -66,7 +66,7 @@ export async function signIn(
 
   return {
     ...issuePair({ userId: user.id, sessionId: session.id, secret }, { jwtSecret, now, tokenTtls }),
-    user: { id: user.id, phoneNumber: user.phoneNumber, displayName: user.displayName },
+    user: { id: user.id, phoneNumber: user.phoneNumber, displayName: user.displayName, about: user.about, avatarUrl: user.avatarUrl },
   };
 }
 

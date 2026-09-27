@@ -225,6 +225,7 @@ describe('hydrateUpdates', () => {
     assert.deepEqual(users[0], {
       id: alice.id,
       displayName: 'Alice',
+      about: null,
       avatarUrl: null,
       phoneNumber: alice.phoneNumber,
     });

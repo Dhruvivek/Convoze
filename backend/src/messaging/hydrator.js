@@ -3,7 +3,7 @@ import { UPDATE_KINDS } from './kinds.js';
 import { messagePayload, tombstone } from './messagePayload.js';
 import { unreadCountFor } from './unreadCount.js';
 
-export const USER_SELECT = { id: true, displayName: true, avatarUrl: true, phoneNumber: true };
+export const USER_SELECT = { id: true, displayName: true, about: true, avatarUrl: true, phoneNumber: true };
 
 // Distinct values of `field` across `rows`, optionally narrowed to one
 // `kind` first; always present since a kind's own ref field is never null.

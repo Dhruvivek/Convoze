@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../data/chat_message_view.dart';
@@ -337,6 +338,8 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     final title =
         ref.watch(chatThreadTitleProvider(widget.conversationId)).value ??
         '';
+    final otherUserId =
+        ref.watch(chatThreadOtherUserIdProvider(widget.conversationId)).value;
     final messagesAsync = ref.watch(chatMessagesProvider(widget.conversationId));
     final threadState = ref.watch(
       chatThreadControllerProvider(widget.conversationId),
@@ -350,12 +353,17 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
-        title: Row(
-          children: [
-            _InitialsAvatar(seed: widget.conversationId, label: title),
-            const SizedBox(width: 12),
-            Expanded(child: Text(title, overflow: TextOverflow.ellipsis)),
-          ],
+        title: InkWell(
+          onTap: otherUserId == null
+              ? null
+              : () => context.push('/users/$otherUserId'),
+          child: Row(
+            children: [
+              _InitialsAvatar(seed: widget.conversationId, label: title),
+              const SizedBox(width: 12),
+              Expanded(child: Text(title, overflow: TextOverflow.ellipsis)),
+            ],
+          ),
         ),
       ),
       body: Column(

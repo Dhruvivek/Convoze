@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/widgets/connecting_banner.dart';
 import '../../auth/presentation/logout_menu.dart';
 import '../../conversations/presentation/conversations_screen.dart';
+import '../../profile/data/profile_repository.dart';
 import '../../profile/presentation/profile_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
 
@@ -11,20 +13,24 @@ import '../../settings/presentation/settings_screen.dart';
 /// Settings, under one shared app bar (a constant "Convoze" title; the
 /// overflow menu and — on Chats only — search and the compose FAB live
 /// here too).
-class HomeShell extends StatefulWidget {
+class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
 
   @override
-  State<HomeShell> createState() => _HomeShellState();
+  ConsumerState<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends ConsumerState<HomeShell> {
   int _index = 0;
 
   void _openProfileTab() => setState(() => _index = 1);
 
   @override
   Widget build(BuildContext context) {
+    // Bootstraps `ProfileSync` (#43) for the whole signed-in session, so the
+    // signed-in User's own profile refreshes on every reconnect regardless
+    // of which tab is showing.
+    ref.watch(profileSyncProvider);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Convoze'),

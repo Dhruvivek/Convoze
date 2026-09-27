@@ -78,6 +78,11 @@ class MediaRepository {
   Future<CloudinaryUploadResult> uploadDocument(File file, {String? extension}) =>
       _upload(file, kind: 'file', fallbackFormat: extension?.toLowerCase());
 
+  /// A profile avatar (#43) — unlike chat media, this is a public upload
+  /// (`uploadType` comes back as `'upload'`, not `'authenticated'`) under an
+  /// unguessable `avatars/<uuid>` id.
+  Future<CloudinaryUploadResult> uploadAvatar(File file) => _upload(file, kind: 'avatar');
+
   Future<CloudinaryUploadResult> _upload(
     File file, {
     required String kind,
@@ -90,15 +95,16 @@ class MediaRepository {
     final signature = signatureRes.data!;
 
     // Exactly the params `signUpload` signed (`backend/src/media/cloudinarySigner.js`):
-    // `{public_id, timestamp, type: 'authenticated'}` — Cloudinary rejects
-    // the request if this doesn't match what the signature covers.
+    // `{public_id, timestamp, type}` — Cloudinary rejects the request if
+    // this doesn't match what the signature covers. `type` is
+    // `'authenticated'` for chat media, `'upload'` (public) for an avatar.
     final uploadDio = Dio();
     final response = await uploadDio.post<Map<String, dynamic>>(
       signature['uploadUrl'] as String,
       data: FormData.fromMap({
         'public_id': signature['publicId'],
         'timestamp': signature['timestamp'],
-        'type': 'authenticated',
+        'type': signature['uploadType'],
         'api_key': signature['apiKey'],
         'signature': signature['signature'],
         'file': await MultipartFile.fromFile(file.path),

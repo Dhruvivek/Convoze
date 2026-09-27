@@ -12,6 +12,8 @@ class Users extends Table {
   TextColumn get id => text()();
   TextColumn get phoneNumber => text()();
   TextColumn get displayName => text().nullable()();
+  // A short status line (#43).
+  TextColumn get about => text().nullable()();
   TextColumn get avatarUrl => text().nullable()();
 
   @override

@@ -19,6 +19,7 @@ class TokenStore {
   static const _refreshTokenKey = 'refresh_token';
   static const _userKey = 'user';
   static const _deviceIdKey = 'device_id';
+  static const _profileSetupSeenKey = 'profile_setup_seen';
 
   Future<String?> readAccessToken() => _storage.read(key: _accessTokenKey);
 
@@ -66,6 +67,17 @@ class TokenStore {
     await _storage.write(key: _deviceIdKey, value: created);
     return created;
   }
+
+  /// Whether the first-run "Set up your profile" step (#43) has already
+  /// been shown or skipped on this install. Deliberately **not** cleared by
+  /// [clearSession] — like [deviceId], it names this install, not the
+  /// login, so signing out and back in on the same phone doesn't show it
+  /// again.
+  Future<bool> hasSeenProfileSetup() async =>
+      await _storage.read(key: _profileSetupSeenKey) != null;
+
+  Future<void> markProfileSetupSeen() =>
+      _storage.write(key: _profileSetupSeenKey, value: 'true');
 }
 
 @Riverpod(keepAlive: true)

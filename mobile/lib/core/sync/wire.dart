@@ -18,6 +18,7 @@ Future<void> upsertUsers(AppDatabase db, List<dynamic> usersJson) async {
             id: json['id'] as String,
             phoneNumber: json['phoneNumber'] as String,
             displayName: Value(json['displayName'] as String?),
+            about: Value(json['about'] as String?),
             avatarUrl: Value(json['avatarUrl'] as String?),
           ),
         );

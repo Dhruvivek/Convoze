@@ -24,10 +24,16 @@ class Unauthenticated extends AuthStatus {
 /// There is a Session on this Device. Its access token may have expired; the
 /// first 401 refreshes it.
 class Authenticated extends AuthStatus {
-  const Authenticated(this.user);
+  const Authenticated(this.user, {this.needsProfileSetup = false});
 
   /// Who is signed in, as they were at sign-in.
   final User user;
+
+  /// Whether the router should show the first-run "Set up your profile"
+  /// step (#43) before anything else: true only right after a Device's
+  /// first-ever sign-in, while the User has set neither a name nor a photo
+  /// and hasn't already skipped it on this install.
+  final bool needsProfileSetup;
 }
 
 /// The one source of truth for whether the app is signed in; the router
@@ -50,7 +56,7 @@ class AuthState extends _$AuthState {
       final refreshToken = await tokenStore.readRefreshToken();
       final user = refreshToken == null ? null : await tokenStore.readUser();
       if (user != null) {
-        restored = Authenticated(user);
+        restored = Authenticated(user, needsProfileSetup: await _needsProfileSetup(tokenStore, user));
       } else {
         // Tokens without their User are half a Session; don't leave them
         // behind for the next sign-in to overwrite.
@@ -67,28 +73,27 @@ class AuthState extends _$AuthState {
   Future<void> requestOtp(String phoneNumber) =>
       ref.read(authRepositoryProvider).requestOtp(phoneNumber);
 
-  /// Sets this Device's cached display name. Local-only for now — stands in
-  /// until there's a real profile-update endpoint to call before saving
-  /// (mirrors how the User is already cached locally after sign-in).
-  Future<void> updateDisplayName(String? name) async {
-    final current = state;
-    if (current is! Authenticated) return;
-    final trimmed = name?.trim();
-    final updated = User(
-      id: current.user.id,
-      phoneNumber: current.user.phoneNumber,
-      displayName: (trimmed == null || trimmed.isEmpty) ? null : trimmed,
-    );
-    await ref.read(tokenStoreProvider).saveUser(updated);
-    state = Authenticated(updated);
-  }
-
   Future<void> verifyOtp(String phoneNumber, String code) async {
     final result = await ref.read(authRepositoryProvider).verifyOtp(phoneNumber, code);
     final tokenStore = ref.read(tokenStoreProvider);
     await tokenStore.saveTokens(accessToken: result.accessToken, refreshToken: result.refreshToken);
     await tokenStore.saveUser(result.user);
-    state = Authenticated(result.user);
+    state = Authenticated(
+      result.user,
+      needsProfileSetup: await _needsProfileSetup(tokenStore, result.user),
+    );
+  }
+
+  static Future<bool> _needsProfileSetup(TokenStore tokenStore, User user) async {
+    if (user.displayName != null || user.avatarUrl != null) return false;
+    return !(await tokenStore.hasSeenProfileSetup());
+  }
+
+  /// Called once the first-run profile-setup step has been saved or
+  /// skipped, so the router stops sending this session back to it.
+  void profileSetupSeen() {
+    final current = state;
+    if (current is Authenticated) state = Authenticated(current.user);
   }
 
   /// The Session can no longer be renewed and its tokens are already gone:

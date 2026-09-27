@@ -36,18 +36,29 @@ export const MEDIA_LIMITS = {
   file: { resourceType: 'raw', maxBytes: 25 * 1024 * 1024, formats: ['pdf', 'doc', 'docx', 'zip', 'txt'] },
 };
 
-/// A short-lived, signed upload request for `kind` ('image' | 'file'). The
-/// server picks `publicId` as `u/<userId>/<uuid>`, so every asset lives in
-/// its uploader's own folder — `sendMessage.js` checks that prefix as proof
-/// of ownership, with no Cloudinary Admin API call needed (ADR 0002/#40).
+// Profile avatars (#43): unlike chat media, these are public — shown in
+// lists, notifications and contact matches for anyone who can see the
+// person — so they're `type: 'upload'` rather than `'authenticated'`, under
+// an unguessable `avatars/<uuid>` id rather than the uploader's own folder.
+export const AVATAR_LIMITS = { resourceType: 'image', maxBytes: 5 * 1024 * 1024, formats: ['jpg', 'jpeg', 'png', 'webp'] };
+
+/// A short-lived, signed upload request for `kind` ('image' | 'file' | 'avatar').
+/// For 'image'/'file', the server picks `publicId` as `u/<userId>/<uuid>`, so
+/// every asset lives in its uploader's own folder — `sendMessage.js` checks
+/// that prefix as proof of ownership, with no Cloudinary Admin API call
+/// needed (ADR 0002/#40). For 'avatar', `publicId` is `avatars/<uuid>`
+/// instead — no per-user folder, and the upload itself is public
+/// (`type: 'upload'`) rather than `'authenticated'` (#43).
 export function signUpload({ userId, kind }) {
   configure();
-  const limits = MEDIA_LIMITS[kind];
+  const isAvatar = kind === 'avatar';
+  const limits = isAvatar ? AVATAR_LIMITS : MEDIA_LIMITS[kind];
   if (!limits) throw new Error(`signUpload: unknown kind ${kind}`);
 
-  const publicId = `u/${userId}/${randomUUID()}`;
+  const publicId = isAvatar ? `avatars/${randomUUID()}` : `u/${userId}/${randomUUID()}`;
   const timestamp = Math.floor(Date.now() / 1000);
-  const paramsToSign = { public_id: publicId, timestamp, type: 'authenticated' };
+  const type = isAvatar ? 'upload' : 'authenticated';
+  const paramsToSign = { public_id: publicId, timestamp, type };
   const signature = cloudinary.utils.api_sign_request(paramsToSign, cloudinary.config().api_secret);
 
   return {
@@ -56,6 +67,7 @@ export function signUpload({ userId, kind }) {
     timestamp,
     signature,
     publicId,
+    uploadType: type,
     resourceType: limits.resourceType,
     maxBytes: limits.maxBytes,
     allowedFormats: limits.formats,
@@ -100,4 +112,35 @@ export function deliveryUrls({ publicId, resourceType }) {
     transformation: [{ width: 480, crop: 'limit' }],
   });
   return { url, thumbnailUrl };
+}
+
+/// The public, unsigned delivery URL for an avatar (#43) — `type: 'upload'`,
+/// so unlike `deliveryUrls` this never needs re-signing at read time; it's
+/// stored as-is in `User.avatarUrl`. Cropped to a square around its center
+/// (`c_fill,g_auto`) so it always fits a round avatar without client-side
+/// cropping.
+export function avatarDeliveryUrl(publicId) {
+  configure();
+  return cloudinary.url(publicId, {
+    resource_type: 'image',
+    type: 'upload',
+    secure: true,
+    transformation: [{ width: 512, height: 512, crop: 'fill', gravity: 'auto' }],
+  });
+}
+
+/// Best-effort delete of a replaced/removed asset (#43: "an old avatar
+/// deleted from storage when it's replaced or removed"). Callers await this
+/// but never fail the request over it — a stray orphaned asset is a cheaper
+/// mistake than a user-facing 500 on their own profile edit.
+export async function destroyAsset(publicId, resourceType) {
+  configure();
+  try {
+    await cloudinary.uploader.destroy(publicId, {
+      resource_type: resourceType,
+      type: publicId.startsWith('avatars/') ? 'upload' : 'authenticated',
+    });
+  } catch (err) {
+    console.error(`destroyAsset(${publicId}) failed`, err);
+  }
 }

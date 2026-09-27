@@ -11,6 +11,8 @@ import '../../features/conversations/presentation/contact_info_screen.dart';
 import '../../features/conversations/presentation/new_conversation_screen.dart';
 import '../../features/conversations/presentation/search_conversations_screen.dart';
 import '../../features/home/presentation/home_shell.dart';
+import '../../features/profile/presentation/profile_setup_screen.dart';
+import '../../features/profile/presentation/user_profile_screen.dart';
 import 'splash_screen.dart';
 
 part 'app_router.g.dart';
@@ -34,17 +36,25 @@ GoRouter router(Ref ref) {
       final atSplash = location == '/splash';
       // Everything under /login is the unauthenticated area.
       final atLogin = location.startsWith('/login');
+      final atProfileSetup = location == '/profile-setup';
 
       return switch (ref.read(authStateProvider)) {
         Restoring() => atSplash ? null : '/splash',
         Unauthenticated() => atLogin ? null : '/login',
-        Authenticated() => atSplash || atLogin ? '/' : null,
+        // First-run "Set up your profile" (#43): shown once, right after a
+        // Device's first sign-in, ahead of everything else.
+        Authenticated(needsProfileSetup: true) => atProfileSetup ? null : '/profile-setup',
+        Authenticated() => atSplash || atLogin || atProfileSetup ? '/' : null,
       };
     },
     routes: [
       GoRoute(
         path: '/splash',
         builder: (context, state) => const SplashScreen(),
+      ),
+      GoRoute(
+        path: '/profile-setup',
+        builder: (context, state) => const ProfileSetupScreen(),
       ),
       GoRoute(
         path: '/login',
@@ -76,6 +86,12 @@ GoRouter router(Ref ref) {
           GoRoute(
             path: 'archived',
             builder: (context, state) => const ArchivedConversationsScreen(),
+          ),
+          GoRoute(
+            path: 'users/:id',
+            builder: (context, state) => UserProfileScreen(
+              userId: state.pathParameters['id']!,
+            ),
           ),
           GoRoute(
             path: 'thread/:id',

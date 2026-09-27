@@ -13,7 +13,8 @@ part of 'media_repository.dart';
 final mediaRepositoryProvider = MediaRepositoryProvider._();
 
 final class MediaRepositoryProvider
-    extends $FunctionalProvider<MediaRepository, MediaRepository, MediaRepository>
+    extends
+        $FunctionalProvider<MediaRepository, MediaRepository, MediaRepository>
     with $Provider<MediaRepository> {
   MediaRepositoryProvider._()
     : super(

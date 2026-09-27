@@ -93,6 +93,16 @@ Future<String> chatThreadTitle(Ref ref, String conversationId) async {
   );
 }
 
+/// The other Participant's id for a direct chat (#43's entry point to their
+/// profile), or null for a group — there's no one person to show.
+@riverpod
+Future<String?> chatThreadOtherUserId(Ref ref, String conversationId) async {
+  final conversation = await ref.watch(_conversationRowProvider(conversationId).future);
+  if (conversation == null || conversation.type == 'group') return null;
+  final others = await ref.watch(_otherParticipantsProvider(conversationId).future);
+  return others.isEmpty ? null : others.first.userId;
+}
+
 class ChatThreadState {
   const ChatThreadState({this.isLoadingOlder = false, this.reachedStart = false});
 

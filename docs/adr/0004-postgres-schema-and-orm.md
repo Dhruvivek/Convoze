@@ -1,6 +1,6 @@
 # Postgres schema & ORM
 
-**Status:** accepted — amended by [ADR 0008](0008-message-delivery-pipeline-update-log-and-sync-cursor.md) (delivered state reinstated as a Delivery watermark); amended by [ADR 0009](0009-local-first-client-data-layer.md) (Conversation preferences columns on `Participant`); amended by [ADR 0005](0005-realtime-transport-and-flutter-socket-integration.md) (`User.lastSeenAt`, #34)
+**Status:** accepted — amended by [ADR 0008](0008-message-delivery-pipeline-update-log-and-sync-cursor.md) (delivered state reinstated as a Delivery watermark); amended by [ADR 0009](0009-local-first-client-data-layer.md) (Conversation preferences columns on `Participant`); amended by [ADR 0005](0005-realtime-transport-and-flutter-socket-integration.md) (`User.lastSeenAt`, #34); amended by #43 (`User.about`, `User.avatarPublicId`)
 
 ## Context
 
@@ -20,7 +20,11 @@
 ```
 User
  ├─ id (uuidv7 pk), phoneNumber (unique), phoneVerifiedAt,
- │  displayName (nullable), avatarUrl (nullable), createdAt,
+ │  displayName (nullable), about (nullable — #43, ≤140 chars, enforced in
+ │  application code), avatarUrl (nullable — the derived, public Cloudinary
+ │  delivery URL), avatarPublicId (nullable — #43: the `avatars/<uuid>` id
+ │  behind it, kept only so a replaced/removed avatar's asset can be
+ │  destroyed by id), createdAt,
  │  lastSeenAt (nullable — #34: when this User's last live socket
  │  disconnected; "online" itself is derived from the live-connection
  │  registry, never stored)

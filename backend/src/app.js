@@ -12,6 +12,7 @@ import { errorHandler, notFoundHandler } from './http/errors.js';
 import { createMediaRouter } from './media/routes.js';
 import { createMessagingRouter } from './messaging/routes.js';
 import { createRealtime } from './realtime/server.js';
+import { createProfileRouter } from './users/profileRoutes.js';
 import { createUsersRouter } from './users/routes.js';
 
 // Builds the server from its dependencies, so tests and production wire
@@ -91,6 +92,7 @@ export function createApp({
   app.use(createMediaRouter({ prisma, authenticated, clock }));
 
   app.use('/users', createUsersRouter({ prisma, authenticated }));
+  app.use(createProfileRouter({ prisma, authenticated, clock }));
 
   app.use(notFoundHandler);
   app.use(errorHandler);

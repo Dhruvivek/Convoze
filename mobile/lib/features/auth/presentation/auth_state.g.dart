@@ -39,11 +39,14 @@ final class AuthStateProvider extends $NotifierProvider<AuthState, AuthStatus> {
 
   /// {@macro riverpod.override_with_value}
   Override overrideWithValue(AuthStatus value) {
-    return $ProviderOverride(origin: this, providerOverride: $SyncValueProvider<AuthStatus>(value));
+    return $ProviderOverride(
+      origin: this,
+      providerOverride: $SyncValueProvider<AuthStatus>(value),
+    );
   }
 }
 
-String _$authStateHash() => r'c235d40b69b33c0c4eb77a11d65fc218bf78e1f0';
+String _$authStateHash() => r'80501e8dd47303e7eb25ebafa9c3ab039fd5b1a4';
 
 /// The one source of truth for whether the app is signed in; the router
 /// gates screens on it.

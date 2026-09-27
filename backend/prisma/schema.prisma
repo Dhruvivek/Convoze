@@ -43,7 +43,14 @@ model User {
   phoneNumber                String         @unique
   phoneVerifiedAt            DateTime       @db.Timestamptz(3)
   displayName                String?
+  // A short status line (#43), trimmed and ≤140 chars — enforced in
+  // application code, not a Postgres constraint, same as `displayName`.
+  about                      String?
   avatarUrl                  String?
+  // The Cloudinary `avatars/<uuid>` id behind `avatarUrl` (#43), kept only
+  // so a replaced or removed avatar's asset can be destroyed by id — never
+  // read by a client.
+  avatarPublicId             String?
   createdAt                  DateTime       @default(now()) @db.Timestamptz(3)
   // When this User's last live socket disconnected (#34, ADR 0005). "Online"
   // itself is never stored — only derived from the live-connection registry

@@ -53,6 +53,10 @@ void main() {
   setUp(
     () => FlutterSecureStorage.setMockInitialValues({
       'user': '{"id":"u1","phoneNumber":"+14155554821","displayName":null}',
+      // Already past the first-run profile-setup step (#43) — these tests
+      // exercise the splash/login/home redirect, not that one; it gets its
+      // own dedicated test below.
+      'profile_setup_seen': 'true',
     }),
   );
 
@@ -79,6 +83,26 @@ void main() {
     expect(_login, findsNothing);
     await _disposeApp(tester);
   });
+
+  testWidgets(
+    'goes to the first-run profile setup instead of conversations when neither a name nor a photo is set and it hasn\'t been seen yet',
+    (tester) async {
+      // Overrides this suite's shared setUp: no `profile_setup_seen` key,
+      // simulating a Device that hasn't been through it yet (#43).
+      FlutterSecureStorage.setMockInitialValues({
+        'user': '{"id":"u1","phoneNumber":"+14155554821","displayName":null}',
+      });
+      final tokenStore = await _launch(tester);
+
+      tokenStore.refreshTokenRead.complete('session.secret');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Set up your profile'), findsOneWidget);
+      expect(_home, findsNothing);
+      expect(_splash, findsNothing);
+      await _disposeApp(tester);
+    },
+  );
 
   testWidgets('goes from splash to login when nothing is stored', (
     tester,

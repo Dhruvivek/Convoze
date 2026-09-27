@@ -229,7 +229,13 @@ describe('POST /auth/otp/verify', () => {
     assert.equal(typeof res.body.accessToken, 'string');
     assert.equal(typeof res.body.refreshToken, 'string');
     assert.equal(typeof res.body.user.id, 'string');
-    assert.deepEqual(res.body.user, { id: res.body.user.id, phoneNumber: PHONE, displayName: null });
+    assert.deepEqual(res.body.user, {
+      id: res.body.user.id,
+      phoneNumber: PHONE,
+      displayName: null,
+      about: null,
+      avatarUrl: null,
+    });
   });
 
   it('reuses the existing User on a later verify', async () => {

@@ -192,6 +192,90 @@ final class ChatThreadTitleFamily extends $Family
   String toString() => r'chatThreadTitleProvider';
 }
 
+/// The other Participant's id for a direct chat (#43's entry point to their
+/// profile), or null for a group — there's no one person to show.
+
+@ProviderFor(chatThreadOtherUserId)
+final chatThreadOtherUserIdProvider = ChatThreadOtherUserIdFamily._();
+
+/// The other Participant's id for a direct chat (#43's entry point to their
+/// profile), or null for a group — there's no one person to show.
+
+final class ChatThreadOtherUserIdProvider
+    extends $FunctionalProvider<AsyncValue<String?>, String?, FutureOr<String?>>
+    with $FutureModifier<String?>, $FutureProvider<String?> {
+  /// The other Participant's id for a direct chat (#43's entry point to their
+  /// profile), or null for a group — there's no one person to show.
+  ChatThreadOtherUserIdProvider._({
+    required ChatThreadOtherUserIdFamily super.from,
+    required String super.argument,
+  }) : super(
+         retry: null,
+         name: r'chatThreadOtherUserIdProvider',
+         isAutoDispose: true,
+         dependencies: null,
+         $allTransitiveDependencies: null,
+       );
+
+  @override
+  String debugGetCreateSourceHash() => _$chatThreadOtherUserIdHash();
+
+  @override
+  String toString() {
+    return r'chatThreadOtherUserIdProvider'
+        ''
+        '($argument)';
+  }
+
+  @$internal
+  @override
+  $FutureProviderElement<String?> $createElement($ProviderPointer pointer) =>
+      $FutureProviderElement(pointer);
+
+  @override
+  FutureOr<String?> create(Ref ref) {
+    final argument = this.argument as String;
+    return chatThreadOtherUserId(ref, argument);
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is ChatThreadOtherUserIdProvider && other.argument == argument;
+  }
+
+  @override
+  int get hashCode {
+    return argument.hashCode;
+  }
+}
+
+String _$chatThreadOtherUserIdHash() =>
+    r'fdf3ca36c05ef943d75a32e823e5d53b78cac859';
+
+/// The other Participant's id for a direct chat (#43's entry point to their
+/// profile), or null for a group — there's no one person to show.
+
+final class ChatThreadOtherUserIdFamily extends $Family
+    with $FunctionalFamilyOverride<FutureOr<String?>, String> {
+  ChatThreadOtherUserIdFamily._()
+    : super(
+        retry: null,
+        name: r'chatThreadOtherUserIdProvider',
+        dependencies: null,
+        $allTransitiveDependencies: null,
+        isAutoDispose: true,
+      );
+
+  /// The other Participant's id for a direct chat (#43's entry point to their
+  /// profile), or null for a group — there's no one person to show.
+
+  ChatThreadOtherUserIdProvider call(String conversationId) =>
+      ChatThreadOtherUserIdProvider._(argument: conversationId, from: this);
+
+  @override
+  String toString() => r'chatThreadOtherUserIdProvider';
+}
+
 /// Owns the chat screen's history-paging state (#55): the initial "fetch
 /// the first page if nothing's local yet" fetch and the scroll-to-top
 /// trigger both go through [loadOlder], which is guarded against

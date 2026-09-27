@@ -16,8 +16,8 @@ export function createMediaRouter({ prisma, authenticated, clock }) {
 
   router.post('/media/upload-signature', authenticated, (req, res) => {
     const { kind } = req.body ?? {};
-    if (kind !== 'image' && kind !== 'file') {
-      sendError(res, 400, 'invalid_request', "kind must be 'image' or 'file'");
+    if (kind !== 'image' && kind !== 'file' && kind !== 'avatar') {
+      sendError(res, 400, 'invalid_request', "kind must be 'image', 'file' or 'avatar'");
       return;
     }
     if (!signatureRateLimit.consume(req.auth.userId)) {
