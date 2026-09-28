@@ -20,7 +20,7 @@ class PhoneEntryScreen extends ConsumerStatefulWidget {
 }
 
 class _PhoneEntryScreenState extends ConsumerState<PhoneEntryScreen> {
-  final _countryCode = TextEditingController(text: '1');
+  final _countryCode = TextEditingController(text: '91');
   final _number = TextEditingController();
   bool _sending = false;
   String? _error;

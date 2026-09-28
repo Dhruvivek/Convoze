@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../../core/widgets/app_avatar.dart';
 import '../data/chat_message_view.dart';
 import '../data/media_repository.dart';
 import '../data/messages_repository.dart';
@@ -340,6 +341,8 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
         '';
     final otherUserId =
         ref.watch(chatThreadOtherUserIdProvider(widget.conversationId)).value;
+    final avatarUrl =
+        ref.watch(chatThreadOtherAvatarUrlProvider(widget.conversationId)).value;
     final messagesAsync = ref.watch(chatMessagesProvider(widget.conversationId));
     final threadState = ref.watch(
       chatThreadControllerProvider(widget.conversationId),
@@ -359,7 +362,12 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
               : () => context.push('/users/$otherUserId'),
           child: Row(
             children: [
-              _InitialsAvatar(seed: widget.conversationId, label: title),
+              AppAvatar(
+                label: title,
+                seed: widget.conversationId,
+                avatarUrl: avatarUrl,
+                size: 36,
+              ),
               const SizedBox(width: 12),
               Expanded(child: Text(title, overflow: TextOverflow.ellipsis)),
             ],
@@ -402,34 +410,6 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
 }
 
 enum _AttachChoice { photo, document }
-
-class _InitialsAvatar extends StatelessWidget {
-  const _InitialsAvatar({required this.seed, required this.label});
-
-  final String seed;
-  final String label;
-
-  static const _palette = [
-    Color(0xFF6750A4),
-    Color(0xFF386A20),
-    Color(0xFFB3261E),
-    Color(0xFF006874),
-    Color(0xFF9C4146),
-    Color(0xFF4A6363),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _palette[seed.hashCode.abs() % _palette.length];
-    final trimmed = label.trim();
-    final initial = trimmed.isEmpty ? '' : trimmed.substring(0, 1).toUpperCase();
-    return CircleAvatar(
-      radius: 18,
-      backgroundColor: color.withValues(alpha: 0.16),
-      child: Text(initial, style: TextStyle(color: color, fontWeight: FontWeight.w600)),
-    );
-  }
-}
 
 class _Composer extends StatelessWidget {
   const _Composer({

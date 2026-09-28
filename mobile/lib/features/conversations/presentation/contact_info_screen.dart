@@ -58,6 +58,7 @@ class _ContactInfoScreenState extends ConsumerState<ContactInfoScreen> {
             child: AppAvatar(
               label: widget.title,
               seed: widget.conversationId,
+              avatarUrl: current?.avatarUrl,
               size: 96,
             ),
           ),

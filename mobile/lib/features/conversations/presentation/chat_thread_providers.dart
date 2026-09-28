@@ -103,6 +103,19 @@ Future<String?> chatThreadOtherUserId(Ref ref, String conversationId) async {
   return others.isEmpty ? null : others.first.userId;
 }
 
+/// The chat screen header's avatar (#43): the other Participant's photo for
+/// a direct chat, null for a group or when they have none — same
+/// fallback-to-initials contract as [AppAvatar] everywhere else.
+@riverpod
+Future<String?> chatThreadOtherAvatarUrl(Ref ref, String conversationId) async {
+  final conversation = await ref.watch(_conversationRowProvider(conversationId).future);
+  if (conversation == null || conversation.type == 'group') return null;
+  final others = await ref.watch(_otherParticipantsProvider(conversationId).future);
+  if (others.isEmpty) return null;
+  final otherUser = await ref.watch(_localUserProvider(others.first.userId).future);
+  return otherUser?.avatarUrl;
+}
+
 class ChatThreadState {
   const ChatThreadState({this.isLoadingOlder = false, this.reachedStart = false});
 

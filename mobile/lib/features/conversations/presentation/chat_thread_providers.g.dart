@@ -276,6 +276,96 @@ final class ChatThreadOtherUserIdFamily extends $Family
   String toString() => r'chatThreadOtherUserIdProvider';
 }
 
+/// The chat screen header's avatar (#43): the other Participant's photo for
+/// a direct chat, null for a group or when they have none — same
+/// fallback-to-initials contract as [AppAvatar] everywhere else.
+
+@ProviderFor(chatThreadOtherAvatarUrl)
+final chatThreadOtherAvatarUrlProvider = ChatThreadOtherAvatarUrlFamily._();
+
+/// The chat screen header's avatar (#43): the other Participant's photo for
+/// a direct chat, null for a group or when they have none — same
+/// fallback-to-initials contract as [AppAvatar] everywhere else.
+
+final class ChatThreadOtherAvatarUrlProvider
+    extends $FunctionalProvider<AsyncValue<String?>, String?, FutureOr<String?>>
+    with $FutureModifier<String?>, $FutureProvider<String?> {
+  /// The chat screen header's avatar (#43): the other Participant's photo for
+  /// a direct chat, null for a group or when they have none — same
+  /// fallback-to-initials contract as [AppAvatar] everywhere else.
+  ChatThreadOtherAvatarUrlProvider._({
+    required ChatThreadOtherAvatarUrlFamily super.from,
+    required String super.argument,
+  }) : super(
+         retry: null,
+         name: r'chatThreadOtherAvatarUrlProvider',
+         isAutoDispose: true,
+         dependencies: null,
+         $allTransitiveDependencies: null,
+       );
+
+  @override
+  String debugGetCreateSourceHash() => _$chatThreadOtherAvatarUrlHash();
+
+  @override
+  String toString() {
+    return r'chatThreadOtherAvatarUrlProvider'
+        ''
+        '($argument)';
+  }
+
+  @$internal
+  @override
+  $FutureProviderElement<String?> $createElement($ProviderPointer pointer) =>
+      $FutureProviderElement(pointer);
+
+  @override
+  FutureOr<String?> create(Ref ref) {
+    final argument = this.argument as String;
+    return chatThreadOtherAvatarUrl(ref, argument);
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is ChatThreadOtherAvatarUrlProvider &&
+        other.argument == argument;
+  }
+
+  @override
+  int get hashCode {
+    return argument.hashCode;
+  }
+}
+
+String _$chatThreadOtherAvatarUrlHash() =>
+    r'6c6172e9c332d96c384107050e7a18890446856d';
+
+/// The chat screen header's avatar (#43): the other Participant's photo for
+/// a direct chat, null for a group or when they have none — same
+/// fallback-to-initials contract as [AppAvatar] everywhere else.
+
+final class ChatThreadOtherAvatarUrlFamily extends $Family
+    with $FunctionalFamilyOverride<FutureOr<String?>, String> {
+  ChatThreadOtherAvatarUrlFamily._()
+    : super(
+        retry: null,
+        name: r'chatThreadOtherAvatarUrlProvider',
+        dependencies: null,
+        $allTransitiveDependencies: null,
+        isAutoDispose: true,
+      );
+
+  /// The chat screen header's avatar (#43): the other Participant's photo for
+  /// a direct chat, null for a group or when they have none — same
+  /// fallback-to-initials contract as [AppAvatar] everywhere else.
+
+  ChatThreadOtherAvatarUrlProvider call(String conversationId) =>
+      ChatThreadOtherAvatarUrlProvider._(argument: conversationId, from: this);
+
+  @override
+  String toString() => r'chatThreadOtherAvatarUrlProvider';
+}
+
 /// Owns the chat screen's history-paging state (#55): the initial "fetch
 /// the first page if nothing's local yet" fetch and the scroll-to-top
 /// trigger both go through [loadOlder], which is guarded against

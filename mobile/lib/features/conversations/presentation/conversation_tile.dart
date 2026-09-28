@@ -56,7 +56,12 @@ class ConversationTile extends StatelessWidget {
             ),
             child: Row(
               children: [
-                AppAvatar(label: item.title, seed: item.avatarSeed, size: 48),
+                AppAvatar(
+                  label: item.title,
+                  seed: item.avatarSeed,
+                  avatarUrl: item.avatarUrl,
+                  size: 48,
+                ),
                 const SizedBox(width: AppSpacing.md),
                 Expanded(
                   child: Column(

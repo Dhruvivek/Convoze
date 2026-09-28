@@ -9,6 +9,7 @@ class ConversationListItem {
     required this.otherUserId,
     required this.title,
     required this.avatarSeed,
+    required this.avatarUrl,
     required this.previewText,
     required this.lastMessageAt,
     required this.unreadCount,
@@ -27,6 +28,10 @@ class ConversationListItem {
   final String? otherUserId;
   final String title;
   final String avatarSeed;
+
+  /// The other participant's avatar (#43), or null for no photo — same
+  /// fallback-to-initials contract as [AppAvatar].
+  final String? avatarUrl;
   final String previewText;
   final DateTime? lastMessageAt;
   final int unreadCount;

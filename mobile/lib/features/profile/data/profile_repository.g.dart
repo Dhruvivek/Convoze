@@ -103,7 +103,7 @@ final class ProfileSyncProvider extends $NotifierProvider<ProfileSync, void> {
   }
 }
 
-String _$profileSyncHash() => r'8fc40fe3a8642468cc1d52fbd2b7cc5959286c62';
+String _$profileSyncHash() => r'a57f9bfbf3ea2f2878de4dbda5a7409038ef6e90';
 
 /// Refetches the signed-in User's own profile once on every reconnect
 /// (`ProfileRepository.refreshMe`), same trigger `OwnDisconnectedAt`
