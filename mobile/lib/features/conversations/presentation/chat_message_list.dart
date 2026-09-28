@@ -13,8 +13,11 @@ class MessageList extends StatelessWidget {
     required this.scrollController,
     required this.isLoadingOlder,
     required this.reachedStart,
+    required this.keyFor,
     this.onTapFailed,
     this.onLongPress,
+    this.onReplyTap,
+    this.onReactionTap,
   });
 
   final List<ChatMessageView> views;
@@ -22,12 +25,24 @@ class MessageList extends StatelessWidget {
   final bool isLoadingOlder;
   final bool reachedStart;
 
+  /// A stable [GlobalKey] per Message id (#102's "tap the quote to scroll to
+  /// the original"): the screen owns these across rebuilds so
+  /// `Scrollable.ensureVisible` can resolve a target bubble's context.
+  final Key Function(String messageId) keyFor;
+
   /// Called with a failed Outbox row's `clientMsgId` when its bubble is
   /// tapped ("failed — tap to retry or delete", ADR 0009).
   final void Function(String clientMsgId)? onTapFailed;
 
   /// Called on a bubble long-press, e.g. to open `showMessageActions` (#56).
   final void Function(ChatMessageView view)? onLongPress;
+
+  /// Called with the original Message's id when a reply's quoted preview is
+  /// tapped (#102).
+  final void Function(String targetMessageId)? onReplyTap;
+
+  /// Called with a reaction pill's emoji when tapped, to toggle it (#103).
+  final void Function(ChatMessageView view, String emoji)? onReactionTap;
 
   @override
   Widget build(BuildContext context) {
@@ -54,9 +69,12 @@ class MessageList extends StatelessWidget {
         return switch (row) {
           _DateRow(:final day) => _DateSeparator(day: day),
           _MessageRow(:final view) => _MessageBubble(
+            key: keyFor(view.id),
             view: view,
             onTapFailed: onTapFailed,
             onLongPress: onLongPress == null ? null : () => onLongPress!(view),
+            onReplyTap: onReplyTap,
+            onReactionTap: onReactionTap == null ? null : (emoji) => onReactionTap!(view, emoji),
           ),
         };
       },
@@ -186,11 +204,20 @@ String _timeLabel(DateTime utc) {
 }
 
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.view, this.onTapFailed, this.onLongPress});
+  const _MessageBubble({
+    super.key,
+    required this.view,
+    this.onTapFailed,
+    this.onLongPress,
+    this.onReplyTap,
+    this.onReactionTap,
+  });
 
   final ChatMessageView view;
   final void Function(String clientMsgId)? onTapFailed;
   final VoidCallback? onLongPress;
+  final void Function(String targetMessageId)? onReplyTap;
+  final void Function(String emoji)? onReactionTap;
 
   @override
   Widget build(BuildContext context) {
@@ -203,88 +230,190 @@ class _MessageBubble extends StatelessWidget {
         constraints: BoxConstraints(
           maxWidth: MediaQuery.of(context).size.width * 0.78,
         ),
-        child: GestureDetector(
-          onTap: failed && view.clientMsgId != null
-              ? () => onTapFailed?.call(view.clientMsgId!)
-              : null,
-          onLongPress: view.isDeleted ? null : onLongPress,
-          child: Container(
-            margin: const EdgeInsets.symmetric(vertical: 2),
-            padding: view.isImage && !view.isDeleted
-                ? const EdgeInsets.all(4)
-                : const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: view.isDeleted
-                  ? scheme.surfaceContainerHighest.withValues(alpha: 0.5)
-                  : mine
-                  ? scheme.primary
-                  : scheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (view.isDeleted)
-                  Text(
-                    'This message was deleted',
-                    style: TextStyle(
-                      color: scheme.onSurfaceVariant,
-                      fontStyle: FontStyle.italic,
-                    ),
-                  )
-                else if (view.isImage)
-                  _ImageContent(view: view, mine: mine)
-                else if (view.isFile)
-                  _FileContent(view: view, mine: mine)
-                else ...[
-                  Text(
-                    view.content ?? '',
-                    style: TextStyle(color: mine ? scheme.onPrimary : scheme.onSurfaceVariant),
-                  ),
-                  if (view.editedAt != null)
-                    Text(
-                      '(edited)',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: (mine ? scheme.onPrimary : scheme.onSurfaceVariant)
-                            .withValues(alpha: 0.65),
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                ],
-                const SizedBox(height: 2),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: failed
-                      ? [
-                          Text(
-                            'Failed — tap to retry or delete',
-                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: scheme.error,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          _TickIcon(tick: MessageTick.failed, onPrimary: mine),
-                        ]
-                      : [
-                          Text(
-                            _timeLabel(view.createdAt),
-                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: mine
-                                  ? scheme.onPrimary.withValues(alpha: 0.7)
-                                  : scheme.onSurfaceVariant,
-                            ),
-                          ),
-                          if (view.tick != null) ...[
-                            const SizedBox(width: 4),
-                            _TickIcon(tick: view.tick!, onPrimary: mine),
-                          ],
-                        ],
+        child: Column(
+          crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            GestureDetector(
+              onTap: failed && view.clientMsgId != null
+                  ? () => onTapFailed?.call(view.clientMsgId!)
+                  : null,
+              onLongPress: view.isDeleted ? null : onLongPress,
+              child: Container(
+                margin: const EdgeInsets.symmetric(vertical: 2),
+                padding: view.isImage && !view.isDeleted
+                    ? const EdgeInsets.all(4)
+                    : const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: view.isDeleted
+                      ? scheme.surfaceContainerHighest.withValues(alpha: 0.5)
+                      : mine
+                      ? scheme.primary
+                      : scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(14),
                 ),
-              ],
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (view.isDeleted)
+                      Text(
+                        'This message was deleted',
+                        style: TextStyle(
+                          color: scheme.onSurfaceVariant,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      )
+                    else ...[
+                      if (view.replyToMessageId != null)
+                        _ReplyQuoteBlock(
+                          view: view,
+                          mine: mine,
+                          onTap: onReplyTap == null
+                              ? null
+                              : () => onReplyTap!(view.replyToMessageId!),
+                        ),
+                      if (view.isImage)
+                        _ImageContent(view: view, mine: mine)
+                      else if (view.isFile)
+                        _FileContent(view: view, mine: mine)
+                      else ...[
+                        Text(
+                          view.content ?? '',
+                          style: TextStyle(color: mine ? scheme.onPrimary : scheme.onSurfaceVariant),
+                        ),
+                        if (view.editedAt != null)
+                          Text(
+                            '(edited)',
+                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: (mine ? scheme.onPrimary : scheme.onSurfaceVariant)
+                                  .withValues(alpha: 0.65),
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                      ],
+                    ],
+                    const SizedBox(height: 2),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: failed
+                          ? [
+                              Text(
+                                'Failed — tap to retry or delete',
+                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                  color: scheme.error,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              _TickIcon(tick: MessageTick.failed, onPrimary: mine),
+                            ]
+                          : [
+                              Text(
+                                _timeLabel(view.createdAt),
+                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                  color: mine
+                                      ? scheme.onPrimary.withValues(alpha: 0.7)
+                                      : scheme.onSurfaceVariant,
+                                ),
+                              ),
+                              if (view.tick != null) ...[
+                                const SizedBox(width: 4),
+                                _TickIcon(tick: view.tick!, onPrimary: mine),
+                              ],
+                            ],
+                    ),
+                  ],
+                ),
+              ),
             ),
+            if (!view.isDeleted)
+              _ReactionsRow(view: view, onTap: onReactionTap),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ReplyQuoteBlock extends StatelessWidget {
+  const _ReplyQuoteBlock({required this.view, required this.mine, this.onTap});
+
+  final ChatMessageView view;
+  final bool mine;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final foreground = mine ? scheme.onPrimary : scheme.onSurfaceVariant;
+    final preview = view.replyPreview;
+    return GestureDetector(
+      onTap: preview == null ? null : onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: foreground.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(8),
+          border: Border(left: BorderSide(color: foreground.withValues(alpha: 0.6), width: 3)),
+        ),
+        child: Text(
+          preview?.snippet ?? 'Message',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: foreground.withValues(alpha: 0.85),
+            fontSize: 13,
+            fontStyle: (preview?.isDeleted ?? false) ? FontStyle.italic : FontStyle.normal,
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Reaction pills below a bubble (#103), grouped by emoji with a count;
+/// tapping one toggles *this* User's own reaction with that emoji — it
+/// doesn't matter who else already reacted with it.
+class _ReactionsRow extends StatelessWidget {
+  const _ReactionsRow({required this.view, this.onTap});
+
+  final ChatMessageView view;
+  final void Function(String emoji)? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    if (view.reactions.isEmpty) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    final counts = <String, int>{};
+    for (final reaction in view.reactions) {
+      counts[reaction.emoji] = (counts[reaction.emoji] ?? 0) + 1;
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 4),
+      child: Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        children: [
+          for (final entry in counts.entries)
+            InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: onTap == null ? null : () => onTap!(entry.key),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: view.reactedByMeWith(entry.key)
+                      ? scheme.primary.withValues(alpha: 0.18)
+                      : scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(12),
+                  border: view.reactedByMeWith(entry.key)
+                      ? Border.all(color: scheme.primary, width: 1)
+                      : null,
+                ),
+                child: Text('${entry.key} ${entry.value}', style: const TextStyle(fontSize: 12)),
+              ),
+            ),
+        ],
       ),
     );
   }

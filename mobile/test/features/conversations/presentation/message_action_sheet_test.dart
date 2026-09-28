@@ -15,6 +15,7 @@ ChatMessageView _message({
   clientMsgId: 'c1',
   senderId: fromMe ? 'me' : 'other',
   fromMe: fromMe,
+  myUserId: 'me',
   content: content,
   type: type,
   isDeleted: isDeleted,

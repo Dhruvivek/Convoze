@@ -47,6 +47,16 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   /// on this instead of always sending a new Message.
   ChatMessageView? _editing;
 
+  /// The message the next send should reply to (#102), or null while
+  /// composing a plain new one. Mutually exclusive with [_editing] — setting
+  /// either one clears the other.
+  ChatMessageView? _replyTarget;
+
+  /// A stable [GlobalKey] per Message id, so a reply's quoted preview can
+  /// scroll to and highlight the original (#102) via
+  /// `Scrollable.ensureVisible` when it's still loaded locally.
+  final Map<String, GlobalKey> _bubbleKeys = {};
+
   /// The newest message id [markRead] has already been called for, so a
   /// rebuild triggered by something else (e.g. a tick changing) doesn't
   /// call it again.
@@ -113,11 +123,15 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
       );
       return;
     }
+    final replyToMessageId = _replyTarget?.id;
     _composer.clear();
     // `TextEditingController.clear()` doesn't fire `onChanged`, so this
     // needs its own explicit call (#35: "stopTyping is emitted on send").
     _typingRepository.stopTyping(widget.conversationId);
-    await ref.read(messagesRepositoryProvider).send(widget.conversationId, text);
+    setState(() => _replyTarget = null);
+    await ref
+        .read(messagesRepositoryProvider)
+        .send(widget.conversationId, text, replyToMessageId: replyToMessageId);
   }
 
   void _onComposerChanged(String text) {
@@ -131,6 +145,7 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   void _startEdit(ChatMessageView message) {
     if (!ensureConnected(context, ref)) return;
     setState(() {
+      _replyTarget = null;
       _editing = message;
       _composer.text = message.content ?? '';
       _composer.selection = TextSelection.collapsed(offset: _composer.text.length);
@@ -140,6 +155,52 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   void _cancelEdit() {
     setState(() => _editing = null);
     _composer.clear();
+  }
+
+  /// Sets [message] as the next send's reply target (#102) — no connection
+  /// gate, since a reply is just a regular send (the Outbox already carries
+  /// `replyToMessageId` offline like everything else `send` does).
+  void _startReply(ChatMessageView message) {
+    setState(() {
+      _editing = null;
+      _replyTarget = message;
+    });
+  }
+
+  void _cancelReply() {
+    setState(() => _replyTarget = null);
+  }
+
+  /// Toggles [emoji] on [message] (#103) — needs a connection, same as
+  /// edit/delete (ADR 0009: reactions aren't queued in the Outbox).
+  Future<void> _reactTo(ChatMessageView message, String emoji) async {
+    if (!ensureConnected(context, ref)) return;
+    await runMessageAction(
+      context,
+      () => ref.read(messagesRepositoryProvider).toggleReaction(message.id, emoji),
+    );
+  }
+
+  Key _keyFor(String messageId) =>
+      _bubbleKeys.putIfAbsent(messageId, () => GlobalKey());
+
+  /// Scrolls to and briefly reveals the original Message a reply quotes
+  /// (#102), if it's still loaded locally; otherwise says so rather than
+  /// silently doing nothing.
+  void _onReplyTap(String targetMessageId) {
+    final targetContext = _bubbleKeys[targetMessageId]?.currentContext;
+    if (targetContext == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text("That message isn't loaded yet")));
+      return;
+    }
+    unawaited(
+      Scrollable.ensureVisible(
+        targetContext,
+        duration: const Duration(milliseconds: 250),
+        alignment: 0.5,
+      ),
+    );
   }
 
   Future<void> _confirmAndDelete(ChatMessageView message) async {
@@ -157,6 +218,8 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
       showMessageActions(
         context,
         message: message,
+        onReply: () => _startReply(message),
+        onReact: (emoji) => _reactTo(message, emoji),
         onEdit: () => _startEdit(message),
         onDelete: () => _confirmAndDelete(message),
       ),
@@ -384,8 +447,11 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                 scrollController: _scroll,
                 isLoadingOlder: threadState.isLoadingOlder,
                 reachedStart: threadState.reachedStart,
+                keyFor: _keyFor,
                 onTapFailed: (clientMsgId) => unawaited(_handleFailedTap(clientMsgId)),
                 onLongPress: _onMessageLongPress,
+                onReplyTap: _onReplyTap,
+                onReactionTap: _reactTo,
               ),
               AsyncError() => const Center(
                 child: Text('Couldn\'t load this conversation'),
@@ -402,6 +468,15 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
             onChanged: _onComposerChanged,
             onAttach: _uploading ? null : _attach,
             onCancelEdit: _editing == null ? null : _cancelEdit,
+            replyingToSnippet: _replyTarget == null
+                ? null
+                : messageSnippet(
+                    isDeleted: _replyTarget!.isDeleted,
+                    type: _replyTarget!.type,
+                    content: _replyTarget!.content,
+                    mediaFileName: _replyTarget!.mediaFileName,
+                  ),
+            onCancelReply: _replyTarget == null ? null : _cancelReply,
           ),
         ],
       ),
@@ -421,6 +496,8 @@ class _Composer extends StatelessWidget {
     required this.onChanged,
     this.onAttach,
     this.onCancelEdit,
+    this.replyingToSnippet,
+    this.onCancelReply,
   });
 
   final TextEditingController controller;
@@ -435,10 +512,19 @@ class _Composer extends StatelessWidget {
   /// the input instead of the plain composer.
   final VoidCallback? onCancelEdit;
 
+  /// Non-null while composing a reply (#102) — a one-line preview of the
+  /// message being replied to, shown in a cancel banner above the input.
+  /// Mutually exclusive with [onCancelEdit] in practice (the screen clears
+  /// whichever one it isn't starting), but this widget itself doesn't
+  /// enforce that — it just prefers the edit banner if somehow both were set.
+  final String? replyingToSnippet;
+  final VoidCallback? onCancelReply;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final editing = onCancelEdit != null;
+    final replying = !editing && replyingToSnippet != null;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(8),
@@ -462,6 +548,29 @@ class _Composer extends StatelessWidget {
                       iconSize: 18,
                       visualDensity: VisualDensity.compact,
                       onPressed: onCancelEdit,
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              ),
+            if (replying)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 0, 4),
+                child: Row(
+                  children: [
+                    Icon(Icons.reply_outlined, size: 16, color: scheme.primary),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        'Replying to: ${replyingToSnippet!}',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: scheme.primary, fontSize: 12.5),
+                      ),
+                    ),
+                    IconButton(
+                      iconSize: 18,
+                      visualDensity: VisualDensity.compact,
+                      onPressed: onCancelReply,
                       icon: const Icon(Icons.close),
                     ),
                   ],

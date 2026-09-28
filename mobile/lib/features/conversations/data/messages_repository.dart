@@ -184,6 +184,19 @@ class MessagesRepository {
     }
   }
 
+  /// Toggles [emoji] on [messageId] via a direct `reaction:toggle` ack (#103)
+  /// — adds it if this User hasn't reacted with it yet, removes it if they
+  /// have. Same "needs a connection" shape as [editMessage]/[deleteMessage];
+  /// the local replica isn't touched here, the `reaction.changed` Update
+  /// this fans out (the Message's full reaction set) applies through the
+  /// usual sync path.
+  Future<void> toggleReaction(String messageId, String emoji) async {
+    final response = await _emitForAck('reaction:toggle', {'messageId': messageId, 'emoji': emoji});
+    if (response['ok'] != true) {
+      throw MessageActionFailure.fromCode(response['code'] as String?);
+    }
+  }
+
   Future<Map<String, dynamic>> _emitForAck(String event, Map<String, dynamic> data) async {
     final socket = currentSocket();
     if (socket == null) throw const MessageActionNetworkFailure();
